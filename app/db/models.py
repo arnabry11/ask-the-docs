@@ -1,7 +1,8 @@
 from datetime import datetime
 
 from pgvector.sqlalchemy import VECTOR
-from sqlalchemy import ARRAY, DateTime, Integer, Text, func
+from sqlalchemy import ARRAY, Computed, DateTime, Integer, Text, func
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.ingestion.constants import EMBEDDING_DIMENSIONS
@@ -37,6 +38,9 @@ class ChunkRecord(Base):
     text: Mapped[str] = mapped_column(Text)
     token_count: Mapped[int] = mapped_column(Integer)
     embedding: Mapped[list[float]] = mapped_column(VECTOR(EMBEDDING_DIMENSIONS))
+    search_vector: Mapped[str] = mapped_column(
+        TSVECTOR, Computed("to_tsvector('english'::regconfig, text)", persisted=True)
+    )
 
 
 class IngestionAttemptRecord(Base):
