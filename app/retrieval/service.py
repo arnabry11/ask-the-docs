@@ -8,11 +8,18 @@ from app.config import get_settings
 from app.db.connection import get_engine
 from app.ingestion.constants import EMBEDDING_DIMENSIONS
 from app.ingestion.embed import FastEmbedClient, QueryEmbeddingClient
-from app.retrieval.fusion import DEFAULT_RRF_K, FusedChunk, reciprocal_rank_fusion
+from app.retrieval.fusion import DEFAULT_RRF_K, reciprocal_rank_fusion
+from app.retrieval.gate import GateDecision, decide_gate
 from app.retrieval.keyword_repository import (
     MAX_KEYWORD_CANDIDATES,
     KeywordMatch,
     KeywordSearchRepository,
+)
+from app.retrieval.rerank import (
+    MAX_RERANK_CANDIDATES,
+    FastEmbedReranker,
+    RerankedChunk,
+    RerankService,
 )
 from app.retrieval.vector_repository import (
     MAX_QUERY_RESULTS,
@@ -36,7 +43,8 @@ class KeywordSearcher(Protocol):
 @dataclass(frozen=True)
 class QueryResult:
     question: str
-    chunks: tuple[FusedChunk, ...]
+    chunks: tuple[RerankedChunk, ...]
+    gate: GateDecision
 
 
 class QueryService:
@@ -45,10 +53,13 @@ class QueryService:
         embedder: QueryEmbeddingClient,
         vector_searcher: VectorSearcher,
         keyword_searcher: KeywordSearcher,
+        reranker: RerankService,
         *,
         vector_limit: int = MAX_VECTOR_CANDIDATES,
         keyword_limit: int = MAX_KEYWORD_CANDIDATES,
         rrf_k: int = DEFAULT_RRF_K,
+        rerank_top_n: int = MAX_RERANK_CANDIDATES,
+        gate_threshold: float | None = None,
     ) -> None:
         if not 1 <= vector_limit <= MAX_VECTOR_CANDIDATES:
             raise ValueError("vector_limit is out of range")
@@ -56,12 +67,19 @@ class QueryService:
             raise ValueError("keyword_limit is out of range")
         if rrf_k < 1:
             raise ValueError("rrf_k must be positive")
+        if not 1 <= rerank_top_n <= MAX_RERANK_CANDIDATES:
+            raise ValueError("rerank_top_n is out of range")
+        if gate_threshold is not None and not math.isfinite(gate_threshold):
+            raise ValueError("gate_threshold must be finite")
         self.embedder = embedder
         self.vector_searcher = vector_searcher
         self.keyword_searcher = keyword_searcher
+        self.reranker = reranker
         self.vector_limit = vector_limit
         self.keyword_limit = keyword_limit
         self.rrf_k = rrf_k
+        self.rerank_top_n = rerank_top_n
+        self.gate_threshold = gate_threshold
 
     def call(self, question: str, top_k: int = DEFAULT_TOP_K) -> QueryResult:
         normalized = " ".join(question.split())
@@ -86,10 +104,11 @@ class QueryService:
             )
             vector_results = vector_future.result()
             keyword_results = keyword_future.result()
-        return QueryResult(
-            normalized,
-            tuple(reciprocal_rank_fusion(vector_results, keyword_results, top_k, rrf_k=self.rrf_k)),
+        fused = reciprocal_rank_fusion(
+            vector_results, keyword_results, self.rerank_top_n, rrf_k=self.rrf_k
         )
+        reranked = self.reranker.call(normalized, fused, top_k)
+        return QueryResult(normalized, reranked, decide_gate(reranked, self.gate_threshold))
 
 
 @lru_cache
@@ -100,7 +119,10 @@ def get_query_service() -> QueryService:
         FastEmbedClient(),
         VectorSearchRepository(engine),
         KeywordSearchRepository(engine),
+        RerankService(FastEmbedReranker(model_name=settings.rerank_model)),
         vector_limit=settings.top_k_vector,
         keyword_limit=settings.top_k_fts,
         rrf_k=settings.rrf_k,
+        rerank_top_n=settings.rerank_top_n,
+        gate_threshold=settings.gate_threshold,
     )
