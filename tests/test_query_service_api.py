@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import Settings
 from app.ingestion import embed as embed_module
 from app.ingestion.embed import FastEmbedClient
 from app.main import create_app
@@ -233,6 +234,32 @@ def test_query_api_returns_refusal_for_configured_low_score() -> None:
     assert response.json()["gate_threshold"] == 0.3
     assert response.json()["refusal"] == "The available documentation does not cover this question."
     assert len(response.json()["results"]) == 1
+
+
+@pytest.mark.parametrize(("score", "gated"), [(1.49, True), (1.5, False), (1.51, False)])
+def test_query_api_uses_calibrated_default_gate(
+    score: float, gated: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GATE_THRESHOLD", raising=False)
+    app = create_app()
+    app.dependency_overrides[get_query_service] = lambda: QueryService(
+        FakeEmbedder(),
+        FakeVectorSearcher([sample_chunk()]),
+        FakeKeywordSearcher(),
+        RerankService(FakeScorer(score)),
+        gate_threshold=Settings(_env_file=None).gate_threshold,
+    )
+    with TestClient(app) as client:
+        response = client.post("/query", json={"question": "index"})
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["gate_threshold"] == 1.5
+    assert response.json()["gated"] is gated
+    assert response.json()["gate_reason"] == ("below_threshold" if gated else None)
+    assert response.json()["refusal"] == (
+        "The available documentation does not cover this question." if gated else None
+    )
 
 
 @pytest.mark.parametrize(

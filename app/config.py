@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,7 +14,14 @@ class Settings(BaseSettings):
     rrf_k: int = Field(default=60, ge=1)
     rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
     rerank_top_n: int = Field(default=20, ge=1, le=20)
-    gate_threshold: float | None = None
+    gate_threshold: float | None = Field(default=1.5, allow_inf_nan=False)
+
+    @field_validator("gate_threshold", mode="before")
+    @classmethod
+    def allow_disabled_gate(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip().lower() == "off":
+            return None
+        return value
 
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
 

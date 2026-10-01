@@ -28,12 +28,12 @@ Use a dedicated PostgreSQL database containing exactly these 24 pages. With Dock
 COMPOSE_PROJECT_NAME=ask-the-docs-eval POSTGRES_PORT=55432 docker compose up -d db
 DATABASE_URL='postgresql://ask:ask@localhost:55432/ask_the_docs?sslmode=disable' dbmate --no-dump-schema migrate
 DATABASE_URL='postgresql://ask:ask@localhost:55432/ask_the_docs?sslmode=disable' uv run python -m evals.seed_corpus
-DATABASE_URL='postgresql://ask:ask@localhost:55432/ask_the_docs?sslmode=disable' uv run python -m evals.run_retrieval_evals
+GATE_THRESHOLD=off DATABASE_URL='postgresql://ask:ask@localhost:55432/ask_the_docs?sslmode=disable' uv run python -m evals.run_retrieval_evals
 ```
 
 `seed_corpus` verifies the downloaded manifest and files, then ingests them directly with the same parser, chunker, embedder, and repository as the worker. It does not need Redis or source HTTP fetches; the embedding and reranking models may need a one-time download if they are not cached. The evaluator refuses a database with missing or extra documents, records a corpus fingerprint and model/settings metadata, and writes `evals/results/retrieval.json`. It compares vector-only, keyword-only, RRF hybrid, and hybrid plus local reranking on the same question set. No paid model is called.
 
-Hit rate@k means at least one gold document appears among the first *k chunks*. Recall@k is the fraction of gold documents seen there; MRR@k is the reciprocal rank of the first gold-document chunk. Multiple chunks from one document occupy multiple ranks but give no extra recall. Unanswerable questions are excluded from retrieval accuracy and reported separately as gate outcomes. With the default unset threshold, the gate should usually refuse only questions returning no sources; calibration comes in the next feature.
+Hit rate@k means at least one gold document appears among the first *k chunks*. Recall@k is the fraction of gold documents seen there; MRR@k is the reciprocal rank of the first gold-document chunk. Multiple chunks from one document occupy multiple ranks but give no extra recall. Unanswerable questions are excluded from retrieval accuracy and reported separately as gate outcomes. `GATE_THRESHOLD=off` reproduces the committed unset-gate baseline; the application now defaults to the calibrated threshold of 1.5. Use `--output` to preserve the committed report when running a new experiment.
 
 ## First run: 2026-10-01
 

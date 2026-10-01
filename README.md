@@ -2,7 +2,7 @@
 
 A Python and FastAPI service for answering questions about the Rails Guides and PostgreSQL documentation with cited sources. The project will measure retrieval quality, control paid model use, and show the engineering behind a production style RAG system.
 
-The service foundation, corpus preparation, local ingestion, hybrid retrieval, local reranking, and a [retrieval evaluation dataset and first experiment](evals/README.md) are in place. Answer generation will arrive in separate reviewable PRs. Ingestion, retrieval, and the local evaluation make no paid model calls.
+The service foundation, corpus preparation, local ingestion, hybrid retrieval, local reranking, and a [retrieval evaluation dataset with a calibrated gate](evals/README.md) are in place. Answer generation will arrive in separate reviewable PRs. Ingestion, retrieval, and the local evaluation make no paid model calls.
 
 ## Planned request flow
 
@@ -106,7 +106,7 @@ curl --fail --silent --show-error \
 
 Each result includes `rerank_score`, `rrf_score`, one-based `vector_rank` and `keyword_rank`, `cosine_distance`, and `fts_rank`. A missing rank or score is `null` when a chunk came from only one search. Higher cross-encoder scores determine the final order; these raw scores are not probabilities or calibrated confidence values. The candidate limits, fusion constant, model, and rerank limit can be changed with `TOP_K_VECTOR`, `TOP_K_FTS`, `RRF_K`, `RERANK_MODEL`, and `RERANK_TOP_N` in `.env`.
 
-The response also includes `gated`, `gate_reason`, `gate_threshold`, and `refusal`. No sources produce a canned refusal. The score threshold is unset by default, so retrieved passages are not refused on an uncalibrated score. A finite `GATE_THRESHOLD` can be set for experiments; the [first retrieval experiment](evals/README.md#first-run-2026-10-01) establishes a baseline, and a later PR will calibrate the threshold. Changing `RERANK_MODEL` requires recalibrating that threshold. A gated response still includes its closest sources. The endpoint returns sources for inspection and does not generate an answer or call an LLM.
+The response also includes `gated`, `gate_reason`, `gate_threshold`, and `refusal`. No sources produce a canned refusal. The default score threshold is **1.5**, selected by the [gate calibration study](evals/README.md#gate-calibration-study): it refused 7 of 10 unsupported questions while incorrectly refusing 1 of 50 answerable questions on the same small evaluation set. A score strictly below the threshold produces the canned refusal. Set `GATE_THRESHOLD` to another finite number to experiment, or `GATE_THRESHOLD=off` to disable score gating. Recalibrate after changing the corpus, reranker model, or retrieval settings. A gated response still includes its closest sources. The endpoint returns sources for inspection and does not generate an answer or call an LLM.
 
 For Ruby developers: `pyproject.toml` plus `uv.lock` serve the role of a Gemfile and lockfile. `app/main.py` assembles the FastAPI application; `app/api` contains thin HTTP routes. Later domain services and external API clients will stay outside routes, like service objects and client/resource classes in Ruby.
 
