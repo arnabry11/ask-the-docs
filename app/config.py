@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "Ask the Docs"
+    database_url: str = "postgresql://ask:ask@localhost:5432/ask_the_docs?sslmode=disable"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

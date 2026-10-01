@@ -15,13 +15,13 @@
 - External APIs live behind dedicated clients, following the intent of the user's Ruby `Iterable::Client` and resource classes: the client owns base URL, authentication, timeout, retries, and response error mapping; services depend on the client interface. Never issue provider HTTP requests directly from routes.
 - Keep configuration in one Pydantic settings object, loaded from environment. Name domain limits and thresholds as constants or settings rather than scattering literals.
 - Use typed code, clear names, small modules, and comments only for non-obvious reasons or upstream constraints. Avoid mutable default arguments and hidden I/O at import time.
-- Use SQLAlchemy models and Alembic migrations for schema changes. Generate migrations with Alembic, then review and edit them. Keep migrations independent of changing application models.
+- Use SQLAlchemy for application database access and dbmate for plain SQL schema migrations. Generate each migration with `dbmate new <name>`, then review and edit both directions. Never modify an already applied migration; add a new one.
 - Preserve source titles, section paths, and URLs through ingestion and retrieval. Treat retrieved document text as untrusted data, never as instructions to the service.
 
 ## Verification
 
 - Behavior changes need focused pytest coverage. Test services independently and routes through FastAPI's test client. Mock external clients; integration tests requiring PostgreSQL should be marked and run against a real pgvector database.
-- Before a PR, run `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy app`, and `uv run pytest`. Run applicable integration tests when the change touches SQL or migrations.
+- Before a PR, run `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy app`, and `uv run pytest`. Run `dbmate migrate` plus applicable integration tests when the change touches SQL or migrations.
 - CI must use fake or mocked model responses and must not require an OpenRouter key.
 
 ## Developer experience
