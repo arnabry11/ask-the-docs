@@ -1,15 +1,15 @@
 # Ask the Docs
 
-A Python and FastAPI service for answering questions about the Rails Guides and PostgreSQL documentation with cited sources. The project will measure retrieval quality, control paid model use, and show the engineering behind a production style RAG system.
+A Python and FastAPI service for answering questions about the Rails Guides and PostgreSQL documentation with cited sources. The project measures retrieval quality and shows the engineering behind a production style RAG system.
 
-The service foundation, corpus preparation, local ingestion, hybrid retrieval, local reranking, and a [retrieval evaluation dataset with a calibrated gate](evals/README.md) are in place. Answer generation will arrive in separate reviewable PRs. Ingestion, retrieval, and the local evaluation make no paid model calls.
+The service foundation, corpus preparation, local ingestion, hybrid retrieval, local reranking, a [retrieval evaluation dataset with a calibrated gate](evals/README.md), and opt-in cited answer generation are in place. Ingestion, retrieval, and the local evaluation make no paid model calls. Generation remains disabled until you configure an OpenRouter key and model.
 
-## Planned request flow
+## Request flow
 
 1. Retrieve from PostgreSQL full text search and pgvector using local embeddings.
 2. Fuse results, rerank locally, and refuse questions below a calibrated confidence threshold.
-3. Return a cached answer when available; otherwise enforce a daily budget before one OpenRouter generation call.
-4. Return cited sources and record latency, token use, and estimated cost.
+3. Return a cached answer when available; otherwise request one OpenRouter generation.
+4. Stream a provisional answer, verify its citation markers, and return the final cited answer.
 
 ## Development workflow
 
@@ -108,7 +108,24 @@ Each result includes `rerank_score`, `rrf_score`, one-based `vector_rank` and `k
 
 The response also includes `gated`, `gate_reason`, `gate_threshold`, and `refusal`. No sources produce a canned refusal. The default score threshold is **1.5**, selected by the [gate calibration study](evals/README.md#gate-calibration-study): it refused 7 of 10 unsupported questions while incorrectly refusing 1 of 50 answerable questions on the same small evaluation set. A score strictly below the threshold produces the canned refusal. Set `GATE_THRESHOLD` to another finite number to experiment, or `GATE_THRESHOLD=off` to disable score gating. Recalibrate after changing the corpus, reranker model, or retrieval settings. A gated response still includes its closest sources. The endpoint returns sources for inspection and does not generate an answer or call an LLM.
 
-For Ruby developers: `pyproject.toml` plus `uv.lock` serve the role of a Gemfile and lockfile. `app/main.py` assembles the FastAPI application; `app/api` contains thin HTTP routes. Later domain services and external API clients will stay outside routes, like service objects and client/resource classes in Ruby.
+## Generate a cited answer
+
+`POST /answer` uses the same local retrieval and gate as `/query`, then streams server-sent events. The default `.env` has no OpenRouter key or model, so it makes no provider call.
+
+```sh
+curl -N --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"How do PostgreSQL indexes help queries?"}' \
+  http://127.0.0.1:8000/answer
+```
+
+The stream sends `sources`, then zero or more `token` events, then one `done` event. Token events are **provisional**. A client should display the answer as final only when `done.status` is `generated` or `cached`; an invalid citation, provider error, or interrupted stream leaves only the retrieved sources. The final event includes citation metadata, `cached`, `refusal`, and `degraded`. The JSON `/query` endpoint remains available for inspecting retrieval without generation.
+
+To opt in to live generation, set `OPENROUTER_API_KEY` and `LLM_MODEL` in your ignored `.env`. Choose a specific model and check its current [OpenRouter model pricing](https://openrouter.ai/models). `CONTEXT_CHUNKS` (default 4) and `CONTEXT_TOKENS_PER_CHUNK` (default 300) bound supplied passages; `MAX_OUTPUT_TOKENS` defaults to 512. The request uses temperature 0. This app does not set a daily call or spending limit.
+
+Successful answers are cached in PostgreSQL by normalized question, exact ordered chunk IDs and context hash, model, prompt version, and output cap. Cached replies make no new provider call. Two simultaneous cache misses may each call the provider; only one answer is stored. The answer prompt treats retrieved passages as untrusted data, asks for numbered citations, and checks that every cited marker names a supplied source. Marker validity does not prove that a claim is supported; answer-quality checks are the next planned feature.
+
+For Ruby developers: `pyproject.toml` plus `uv.lock` serve the role of a Gemfile and lockfile. `app/main.py` assembles the FastAPI application; `app/api` contains thin HTTP routes. `app/generation/openrouter_client.py` owns provider HTTP behavior, while `app/generation/service.py` coordinates the workflow and `app/generation/repository.py` owns persistence, matching the client and service-object separation used in Ruby.
 
 ## License
 
