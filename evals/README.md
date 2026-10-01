@@ -72,3 +72,17 @@ The script verifies the dataset hash, question IDs, labels, and finite reranker 
 At 1.5, Q025 is the single incorrectly refused answerable question. Its gold indexes overview reached rank eight in the retrieval baseline, so the low score may reflect a context retrieval failure. Q054, Q055, and Q058 are unsupported questions that still pass the gate. A high score means the retrieved text looks relevant to the reranker; it does not prove the answer is in the selected passages.
 
 The same 60 questions selected and evaluated this threshold, and only 10 are unanswerable. These counts are calibration-set results, not held-out performance estimates. The score scale also belongs to the recorded reranker and retrieval settings; changing the model, corpus, or candidate strategy requires another evaluation. This gate reduces unnecessary generation calls but cannot replace the answer prompt's instruction to refuse unsupported requests.
+
+## Keyword fallback follow-up
+
+When the whole-question full-text query finds no chunks, keyword search now retries with an OR query of up to five distinct content terms. Quoted phrase and explicit `OR` searches retain their original meaning. The [follow-up report](results/retrieval_keyword_fallback.json) uses the same 24 pages and 60 questions with the application's 1.5 gate threshold.
+
+For Q002, PostgreSQL parsed the original question as `'rail' & 'command' & 'run' & 'pend' & 'databas' & 'migrat' & 'new' & 'app'`, matching zero chunks. Its fallback parsed as `'migrat' | 'databas' | 'command' | 'pend' | 'rail'`, matching 397 chunks before the 30-candidate limit. For Q001, the original parsed conjunction matched one chunk, so no fallback ran. These counts explain both the recovery and the risk of broad matches.
+
+| Mode | Baseline hit@5 | Fallback hit@5 |
+| --- | ---: | ---: |
+| Keyword only | 8/50 | 34/50 |
+| RRF hybrid | 47/50 | 44/50 |
+| Hybrid + rerank | 48/50 | 48/50 |
+
+The fallback improves the weak keyword branch while leaving final reranked hit@5 unchanged. It makes intermediate hybrid ranking noisier, so this is a modest retrieval fix rather than a measured end-to-end gain. With the existing gate threshold, 7/10 unanswerable questions were refused and 2/50 answerable questions were incorrectly refused. The threshold was calibrated on the old retrieval output and should be revisited before relying on refusal rates.

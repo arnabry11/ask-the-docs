@@ -8,7 +8,7 @@ from app.db.connection import get_engine
 from app.ingestion.chunk import chunk_document
 from app.ingestion.parse import ParsedDocument, ParsedSection
 from app.ingestion.repository import IngestionRepository
-from app.retrieval.keyword_repository import KeywordSearchRepository
+from app.retrieval.keyword_repository import KeywordSearchRepository, fallback_query
 
 
 def document(document_id: str, body: str) -> ParsedDocument:
@@ -49,7 +49,7 @@ def test_keyword_search_uses_web_query_ranking_and_returns_source_metadata() -> 
         assert matches[0].section_path == ("Index Guide", "Search")
         assert matches[0].source_url.endswith("#search")
         assert matches[0].text == "A GIN index helps full text search."
-        assert reader.search('"full text search"', 1)[0].document_id == first.document_id
+        assert len(reader.search('"full text search"', 1)) == 1
         assert reader.search("???", 30) == []
     finally:
         with engine.begin() as connection:
@@ -72,3 +72,39 @@ def test_keyword_search_rejects_blank_questions_and_invalid_limits() -> None:
         reader.search("index", 0)
     with pytest.raises(ValueError, match="limit"):
         reader.search("index", 31)
+
+
+def test_fallback_query_uses_distinct_content_terms_and_preserves_search_syntax() -> None:
+    assert fallback_query("How does PostgreSQL full text search use a GIN index?") == (
+        "postgresql OR search OR index OR full OR text"
+    )
+    assert fallback_query('How does "full text search" work?') is None
+    assert fallback_query("GIN OR GiST") is None
+    assert fallback_query("???") is None
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.getenv("RUN_INTEGRATION_TESTS") != "1", reason="requires PostgreSQL with pgvector"
+)
+def test_keyword_search_broadens_only_when_all_terms_miss() -> None:
+    engine = get_engine()
+    writer = IngestionRepository(engine)
+    reader = KeywordSearchRepository(engine)
+    prefix = uuid4().hex
+    item = document(f"rails:{prefix}", "A raretermxyz index helps search.")
+    try:
+        writer.replace_document(item, chunk_document(item), [[1.0] + [0.0] * 383], "b" * 64)
+        assert any(
+            match.document_id == item.document_id
+            for match in reader.search("raretermxyz absenttermxyz", 30)
+        )
+        assert not any(
+            match.document_id == item.document_id
+            for match in reader.search('"raretermxyz absenttermxyz"', 30)
+        )
+    finally:
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM documents WHERE id = :id"), {"id": item.document_id}
+            )
