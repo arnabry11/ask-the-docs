@@ -62,11 +62,16 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ask}
       POSTGRES_DB: ${POSTGRES_DB:-ask_the_docs}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-55432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$$POSTGRES_PASSWORD"
+          psql -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+          -qAtc 'SELECT 1' >/dev/null
       interval: 5s
       timeout: 5s
       retries: 10
