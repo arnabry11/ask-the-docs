@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
     rerank_top_n: int = Field(default=20, ge=1, le=20)
     gate_threshold: float | None = Field(default=1.5, allow_inf_nan=False)
+    openrouter_api_key: str = ""
+    llm_model: str = ""
+    context_chunks: int = Field(default=4, ge=1, le=5)
+    context_tokens_per_chunk: int = Field(default=300, ge=1, le=400)
+    max_output_tokens: int = Field(default=512, ge=1, le=2048)
 
     @field_validator("gate_threshold", mode="before")
     @classmethod
