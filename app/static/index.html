@@ -93,6 +93,25 @@
     const send = document.querySelector("#send");
     const cancel = document.querySelector("#cancel");
     let controller = null;
+    let followOutput = true;
+    let scrollPending = false;
+
+    window.addEventListener("scroll", () => {
+      const page = document.scrollingElement || document.documentElement;
+      followOutput = page.scrollHeight - page.scrollTop - page.clientHeight < 120;
+    }, { passive: true });
+
+    function scrollToLatest(force = false) {
+      if (force) followOutput = true;
+      if (!followOutput || scrollPending) return;
+      scrollPending = true;
+      requestAnimationFrame(() => {
+        scrollPending = false;
+        if (!followOutput) return;
+        const page = document.scrollingElement || document.documentElement;
+        page.scrollTop = page.scrollHeight;
+      });
+    }
 
     function addMessage(role, text = "") {
       const article = document.createElement("article");
@@ -115,7 +134,6 @@
       bubble.append(label, status, answer, sources);
       article.append(avatar, bubble);
       chat.append(article);
-      article.scrollIntoView({ behavior: "smooth", block: "end" });
       return { article, status, answer, sources };
     }
 
@@ -148,6 +166,7 @@
       cancel.hidden = false;
       addMessage("user", question);
       const reply = addMessage("assistant");
+      scrollToLatest(true);
       let draft = "";
       let finalized = false;
       try {
@@ -167,7 +186,7 @@
             if (data.status === "not_configured") reply.status.textContent = "Set OPENROUTER_API_KEY and LLM_MODEL on the server to generate answers.";
             if (data.degraded && data.status !== "not_configured") reply.status.textContent = `Answer unavailable (${data.status}). Sources remain above.`;
           }
-          reply.article.scrollIntoView({ behavior: "smooth", block: "end" });
+          scrollToLatest();
         }, { signal: controller.signal });
       } catch (error) {
         if (!finalized) {
