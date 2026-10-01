@@ -34,7 +34,7 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run mypy app
+      - run: uv run mypy app evals
       - name: Install dbmate
         run: |
           curl -fsSLo "$RUNNER_TEMP/dbmate" https://github.com/amacneil/dbmate/releases/download/v2.36.0/dbmate-linux-amd64

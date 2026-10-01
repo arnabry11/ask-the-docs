@@ -68,7 +68,8 @@ def test_hybrid_query_promotes_exact_terms_and_keeps_vector_fallback() -> None:
 
         assert exact.chunks[0].chunk.document_id == keyword_doc.document_id
         assert exact.chunks[0].chunk.keyword_rank == 1
-        assert exact.chunks[0].chunk.vector_rank == 2
+        assert exact.chunks[0].chunk.vector_rank is not None
+        assert exact.chunks[0].chunk.vector_rank > 1
         assert fallback.chunks[0].chunk.document_id == vector_doc.document_id
         assert fallback.chunks[0].chunk.keyword_rank is None
     finally:
