@@ -28,6 +28,13 @@ class AnswerRequest(BaseModel):
 @router.post(
     "/answer",
     response_class=StreamingResponse,
+    summary="Stream a cited answer",
+    description=(
+        "Server-sent events: `progress` reports user-visible stages, `sources` gives the "
+        "retrieved passages, `token` carries provisional answer text, and `done` gives the "
+        "authoritative final answer or failure status. Use a streaming `fetch()` client; "
+        "the interactive API docs show the raw event stream. See `/demo/` for a browser example."
+    ),
     responses={200: {"content": {"text/event-stream": {}}}},
 )
 def answer(

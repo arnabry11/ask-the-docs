@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Ask the Docs · Streaming demo</title>
+  <style>
+    :root { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #eaf2f0; background: #09151a; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 70% -15%, #184842 0, transparent 42%), #09151a; }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+    a { color: #8be2d1; }
+    .shell { width: min(880px, calc(100% - 32px)); min-height: 100vh; margin: auto; display: flex; flex-direction: column; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 28px 0 19px; border-bottom: 1px solid #244046; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: #71e1c9; color: #092521; font-weight: 800; font-size: 20px; }
+    h1 { margin: 0; font-size: 18px; letter-spacing: -.03em; }
+    .sub { margin: 3px 0 0; color: #9bb8b6; font-size: 12px; }
+    .pill { padding: 7px 11px; border: 1px solid #38605a; border-radius: 999px; color: #9de6d7; font-size: 12px; white-space: nowrap; }
+    main { flex: 1; padding: 28px 0 24px; }
+    .intro { padding: 28px; border: 1px solid #2b4e4d; border-radius: 20px; background: linear-gradient(145deg, #173d3c, #10292f); box-shadow: 0 20px 60px #0002; }
+    .intro h2 { margin: 0 0 8px; font-size: clamp(25px, 4vw, 34px); letter-spacing: -.05em; }
+    .intro p { max-width: 62ch; margin: 0; color: #bfd0cf; line-height: 1.55; }
+    .examples { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; }
+    .example { padding: 10px 13px; background: #ffffff0d; border: 1px solid #52716e; border-radius: 11px; color: #eaf2f0; text-align: left; }
+    .example:hover, .example:focus-visible { background: #ffffff1a; border-color: #8be2d1; }
+    #chat { display: grid; gap: 22px; margin-top: 28px; }
+    .message { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; }
+    .avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: #274d4a; color: #b4f1e4; font-size: 13px; font-weight: 700; }
+    .message.user .avatar { background: #374657; color: #e2eeff; }
+    .bubble { min-width: 0; padding: 16px 18px; border: 1px solid #2a4248; border-radius: 5px 17px 17px 17px; background: #10242b; }
+    .message.user .bubble { background: #172b35; }
+    .label { margin: 0 0 8px; color: #94b7b0; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+    .status { min-height: 18px; color: #8be2d1; font-size: 13px; }
+    .status:empty { display: none; }
+    .answer { margin: 7px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+    .answer:empty { display: none; }
+    .answer.provisional { opacity: .72; }
+    .sources { margin-top: 14px; padding-top: 12px; border-top: 1px solid #2a4248; color: #adc3c0; font-size: 13px; }
+    .sources:empty { display: none; }
+    .sources summary { cursor: pointer; }
+    .sources ol { display: grid; gap: 7px; margin: 10px 0 0; padding-left: 20px; }
+    .sources a { text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    footer { position: sticky; bottom: 0; padding: 16px 0 21px; background: linear-gradient(transparent, #09151a 17%); }
+    form { display: flex; align-items: end; gap: 10px; padding: 10px; border: 1px solid #42605e; border-radius: 16px; background: #13292e; box-shadow: 0 14px 30px #0005; }
+    form:focus-within { border-color: #8be2d1; }
+    textarea { flex: 1; resize: vertical; min-height: 48px; max-height: 180px; padding: 12px; border: 0; outline: 0; background: transparent; color: #eef7f3; line-height: 1.4; }
+    textarea::placeholder { color: #8ca7a7; }
+    .send, .cancel { min-width: 75px; height: 42px; border: 0; border-radius: 10px; font-weight: 700; }
+    .send { background: #81e5cf; color: #082821; }
+    .send:hover { background: #abf2e2; }
+    .send:disabled { opacity: .5; cursor: not-allowed; }
+    .cancel { background: #334b50; color: #eaf2f0; }
+    .cancel[hidden] { display: none; }
+    .hint { margin: 10px 4px 0; color: #87a4a3; font-size: 12px; text-align: center; }
+    @media (max-width: 600px) { header { padding-top: 18px; } .pill { display: none; } .intro { padding: 22px; } .shell { width: min(100% - 24px, 880px); } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="brand"><div class="brand-mark" aria-hidden="true">A</div><div><h1>Ask the Docs</h1><p class="sub">Rails Guides + PostgreSQL · streaming demo</p></div></div>
+      <span class="pill">Sources first · answer streamed</span>
+    </header>
+    <main>
+      <section class="intro" aria-labelledby="intro-title">
+        <h2 id="intro-title">Ask a question. Follow the answer.</h2>
+        <p>Watch the service search documentation, show its sources, and stream a cited answer. Each question is independent; this demo does not send conversation history.</p>
+        <div class="examples">
+          <button class="example" type="button" data-question="How does an index on the id column help PostgreSQL find rows in test1?">How do PostgreSQL indexes help?</button>
+          <button class="example" type="button" data-question="When does Rails run Active Record validations?">When does Rails validate?</button>
+        </div>
+      </section>
+      <div id="chat" role="log" aria-live="polite" aria-label="Answer conversation"></div>
+    </main>
+    <footer>
+      <form id="form">
+        <textarea id="question" aria-label="Question" maxlength="500" rows="1" placeholder="Ask about Rails or PostgreSQL…" required></textarea>
+        <button id="cancel" class="cancel" type="button" hidden>Stop</button>
+        <button id="send" class="send" type="submit">Send</button>
+      </form>
+      <p class="hint">Enter to send · Shift+Enter for a new line · streamed text is provisional until citations pass</p>
+    </footer>
+  </div>
+  <script type="module">
+    import { streamAnswer } from "./answer-stream.js";
+
+    const form = document.querySelector("#form");
+    const input = document.querySelector("#question");
+    const chat = document.querySelector("#chat");
+    const send = document.querySelector("#send");
+    const cancel = document.querySelector("#cancel");
+    let controller = null;
+
+    function addMessage(role, text = "") {
+      const article = document.createElement("article");
+      article.className = `message ${role}`;
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = role === "user" ? "You" : "A";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      const label = document.createElement("p");
+      label.className = "label";
+      label.textContent = role === "user" ? "You" : "Ask the Docs";
+      const status = document.createElement("div");
+      status.className = "status";
+      const answer = document.createElement("p");
+      answer.className = "answer";
+      answer.textContent = text;
+      const sources = document.createElement("div");
+      sources.className = "sources";
+      bubble.append(label, status, answer, sources);
+      article.append(avatar, bubble);
+      chat.append(article);
+      article.scrollIntoView({ behavior: "smooth", block: "end" });
+      return { article, status, answer, sources };
+    }
+
+    function showSources(container, items) {
+      if (!items.length) return;
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = `${items.length} source${items.length === 1 ? "" : "s"} used`;
+      const list = document.createElement("ol");
+      items.forEach((item) => {
+        const row = document.createElement("li");
+        const link = document.createElement("a");
+        link.textContent = `[${item.marker}] ${item.title} · ${item.section_path?.at(-1) || item.document_id}`;
+        if (item.source_url?.startsWith("https://")) {
+          link.href = item.source_url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+        }
+        row.append(link);
+        list.append(row);
+      });
+      details.append(summary, list);
+      container.replaceChildren(details);
+    }
+
+    async function ask(question) {
+      if (controller) return;
+      controller = new AbortController();
+      send.disabled = true;
+      cancel.hidden = false;
+      addMessage("user", question);
+      const reply = addMessage("assistant");
+      let draft = "";
+      let finalized = false;
+      try {
+        await streamAnswer(question, ({ type, data }) => {
+          if (type === "progress") reply.status.textContent = data.message;
+          if (type === "sources") showSources(reply.sources, data.sources || []);
+          if (type === "token") {
+            draft += data.text;
+            reply.answer.textContent = draft;
+            reply.answer.classList.add("provisional");
+          }
+          if (type === "done") {
+            finalized = true;
+            reply.answer.classList.remove("provisional");
+            reply.answer.textContent = data.answer || "";
+            reply.status.textContent = data.status === "cached" ? "From answer cache" : "";
+            if (data.status === "not_configured") reply.status.textContent = "Set OPENROUTER_API_KEY and LLM_MODEL on the server to generate answers.";
+            if (data.degraded && data.status !== "not_configured") reply.status.textContent = `Answer unavailable (${data.status}). Sources remain above.`;
+          }
+          reply.article.scrollIntoView({ behavior: "smooth", block: "end" });
+        }, { signal: controller.signal });
+      } catch (error) {
+        if (!finalized) {
+          reply.answer.textContent = "";
+          reply.answer.classList.remove("provisional");
+          reply.status.textContent = error.name === "AbortError" ? "Stopped." : `Stream interrupted: ${error.message}`;
+        }
+      } finally {
+        controller = null;
+        send.disabled = false;
+        cancel.hidden = true;
+        input.focus();
+      }
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const question = input.value.trim();
+      if (!question) return;
+      input.value = "";
+      ask(question);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    cancel.addEventListener("click", () => controller?.abort());
+    document.querySelectorAll("[data-question]").forEach((button) => {
+      button.addEventListener("click", () => {
+        input.value = button.dataset.question;
+        form.requestSubmit();
+      });
+    });
+  </script>
+</body>
+</html>
