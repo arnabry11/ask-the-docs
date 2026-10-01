@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "rails": {
+    "version": "8.1.4",
+    "guide_series": "8.1",
+    "commit": "c3466ea00d7121798e3aa3144ffdf7174b81d8cb",
+    "guides": [
+      "getting_started",
+      "active_record_basics",
+      "active_record_querying",
+      "association_basics",
+      "active_record_migrations",
+      "active_record_postgresql",
+      "active_record_multiple_databases",
+      "active_record_validations",
+      "active_record_callbacks",
+      "caching_with_rails",
+      "active_job_basics",
+      "tuning_performance_for_deployment"
+    ]
+  },
+  "postgresql": {
+    "version": "16",
+    "pages": [
+      "indexes",
+      "indexes-intro",
+      "indexes-types",
+      "indexes-multicolumn",
+      "indexes-expressional",
+      "indexes-partial",
+      "indexes-index-only-scans",
+      "indexes-examine",
+      "performance-tips",
+      "using-explain",
+      "planner-stats",
+      "explicit-joins"
+    ]
+  }
+}
