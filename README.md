@@ -1,132 +1,205 @@
 # Ask the Docs
 
-A Python and FastAPI service for answering questions about the Rails Guides and PostgreSQL documentation with cited sources. The project measures retrieval quality and shows the engineering behind a production style RAG system.
+A portfolio RAG service built with Python and FastAPI. It answers questions about selected **Rails Guides** and **PostgreSQL 16** documentation, shows its sources, and exposes the retrieval steps so they can be inspected separately from generation.
 
-The service foundation, corpus preparation, local ingestion, hybrid retrieval, local reranking, a [retrieval evaluation dataset with a calibrated gate](evals/README.md), and opt-in cited answer generation are in place. Ingestion, retrieval, and the local evaluation make no paid model calls. Generation remains disabled until you configure an OpenRouter key and model.
+**Try `/query` to inspect retrieved passages. Try `/answer` for a streamed, cited answer.** Ingestion, embeddings, search, reranking, and evaluation run locally. Only an opted-in `/answer` cache miss calls OpenRouter.
 
-## Request flow
+| Route | What it returns | External model call? |
+| --- | --- | --- |
+| `GET /health` | Database readiness | No |
+| `POST /ingest` | Redis job IDs for one page or the catalog; requires `X-Admin-Key` | No |
+| `POST /query` | Ranked source chunks, scores, and gate decision as JSON | No |
+| `POST /answer` | Sources, provisional tokens, then a final SSE event | Only on an ungated cache miss with a configured key and model |
 
-1. Retrieve from PostgreSQL full text search and pgvector using local embeddings.
-2. Fuse results, rerank locally, and refuse questions below a calibrated confidence threshold.
-3. Return a cached answer when available; otherwise request one OpenRouter generation.
-4. Stream a provisional answer, verify its citation markers, and return the final cited answer.
+## Architecture
 
-## Development workflow
+```mermaid
+flowchart LR
+    Reader[Reader or API client] --> API[FastAPI]
+    Admin[Admin or enqueue CLI] --> API
+    Admin --> Queue[(Redis queue)]
+    API --> Queue
+    Queue --> Worker[RQ ingestion worker]
+    Web[Rails Guides and PostgreSQL docs] --> Worker
+    Worker --> Parse[Parse and chunk]
+    Parse --> Embed[Local FastEmbed embeddings]
+    Embed --> DB[(PostgreSQL 16<br/>pgvector + full-text search)]
+    API --> Retrieve[Query service]
+    Retrieve --> DB
+    Retrieve --> Rank[Local cross-encoder + gate]
+    Rank --> API
+    API --> Cache[(PostgreSQL answer cache)]
+    API --> Provider[OpenRouter, opt-in]
+```
 
-Features are reviewed as small, focused PR stacks. Each PR describes **What**, **Why**, and **How**. Later milestones are tracked in GitHub issues and started after review of the current stack.
+The API and worker are separate Compose services. [dbmate migrations](db/migrations) create the database objects; [the schema snapshot](db/schema.sql) shows their current shape. Redis holds ingestion jobs, while PostgreSQL holds page metadata, chunks, embeddings, ingestion attempts, and cached answers. The local model files live in an ignored `models/` directory or Compose volume.
 
-## Quick start
+### How documentation becomes searchable
 
-With Docker running:
+```mermaid
+flowchart LR
+    Catalog[24 pinned source pages<br/>corpus/sources.json] --> Job[One RQ job per page]
+    Job --> Fetch[Fetch and verify source]
+    Fetch --> Parse[Preserve headings, links,<br/>code, and source URL]
+    Parse --> Chunk[Deterministic chunks<br/>with limited overlap]
+    Chunk --> Fingerprint{Same ingestion<br/>fingerprint?}
+    Fingerprint -->|Yes| Skip[Record skipped attempt]
+    Fingerprint -->|No| Embed[Embed chunks locally]
+    Embed --> Replace[Replace that page's chunks<br/>in one DB transaction]
+    Replace --> Index[pgvector HNSW +<br/>PostgreSQL FTS GIN indexes]
+```
+
+The fingerprint covers source bytes and pipeline settings. Re-ingesting unchanged pages skips embedding; a changed page replaces its chunks atomically. Each chunk keeps its document ID, title, heading path, and source URL, so retrieval can return a useful citation. You can also [download](scripts/download_corpus.py) and [prepare](scripts/prepare_corpus.py) the corpus into ignored local files without enqueuing jobs.
+
+### How a question becomes an answer
+
+```mermaid
+flowchart TD
+    Question[Question] --> EmbedQ[Local query embedding]
+    EmbedQ --> Vector[pgvector similarity search]
+    Question --> Keyword[PostgreSQL full-text search]
+    Vector --> Fuse[Reciprocal rank fusion]
+    Keyword --> Fuse
+    Fuse --> Rerank[Local cross-encoder rerank]
+    Rerank --> Gate{Score gate}
+    Gate --> Query[POST /query: ranked chunks + gate JSON]
+    Gate -->|Refused on /answer| Refusal[Final refusal; no provider call]
+    Gate -->|Passes on /answer| Cache{Answer cache}
+    Cache -->|Hit| Final[Final answer + citations]
+    Cache -->|Miss| LLM[OpenRouter client]
+    LLM --> Tokens[Provisional SSE tokens]
+    Tokens --> Check{Citation markers valid?}
+    Check -->|Yes| Save[Save answer in PostgreSQL]
+    Save --> Final
+    Check -->|No| Degraded[Final degraded event]
+```
+
+Vector and keyword searches run in parallel. The first search uses local 384-dimensional BGE embeddings; the second uses PostgreSQL `websearch_to_tsquery`. If the whole-question keyword search finds nothing, it retries with a small OR query of content terms. Explicit quoted phrases and `OR` searches keep their original behavior. The lists are fused with RRF, and a local MiniLM cross-encoder reranks the best candidates. The default gate threshold is 1.5; a score strictly below it refuses generation. Raw reranker scores are **not probabilities**.
+
+`/answer` emits `sources`, optional `token` events, and one `done` event. Tokens are provisional; a client should accept the answer only when `done.status` is `generated` or `cached`. Citation checking verifies that each numbered marker names a supplied passage. It cannot establish that every claim is supported by that passage; see the [answer-support cases](evals/README.md#small-answer-support-check).
+
+## Run a local demo
+
+Docker Compose starts PostgreSQL with pgvector, Redis, dbmate, the FastAPI app, and the RQ worker:
 
 ```sh
 cp .env.example .env
-docker compose up --build
+docker compose up -d --build
+docker compose exec app python -m scripts.enqueue_corpus --document-id postgresql:indexes-intro
+docker compose logs -f worker
 ```
 
-The dbmate container applies migrations before the app starts. `GET http://127.0.0.1:8000/health` checks its database connection. PostgreSQL is available on host port 55432 for local development; Redis runs inside the Compose network and will support the later ingestion worker. The example credentials are for local development only.
+The first ingestion downloads the local embedding model. Stop following logs after the job completes. The API runs at `http://127.0.0.1:8000`; [`/docs`](http://127.0.0.1:8000/docs) is the interactive API reference. PostgreSQL is exposed to the host on port `55432` by default.
 
-## Run the API locally
-
-Install [uv](https://docs.astral.sh/uv/), then run:
+**Inspect retrieval first:**
 
 ```sh
-uv sync
-cp .env.example .env
-docker compose up -d db redis
-dbmate migrate
-uv run uvicorn app.main:app --reload
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"How does an index on the id column help PostgreSQL find rows in test1?","top_k":5}' \
+  http://127.0.0.1:8000/query
 ```
 
-Open `http://127.0.0.1:8000/health` for the database readiness response and `/docs` for FastAPI's interactive API docs. Run the checks with:
+The JSON includes the source text and URL, vector/keyword ranks, fused score, rerank score, and gate decision. `top_k` defaults to 5 and accepts 1–20; questions accept at most 500 characters. `/query` never generates an answer.
+
+**Stream an answer:** set `OPENROUTER_API_KEY` and `LLM_MODEL` in your ignored `.env`, then recreate the app container so it receives the new values (`docker compose up -d --force-recreate app`).
 
 ```sh
+curl -N --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"How does an index on the id column help PostgreSQL find rows in test1?"}' \
+  http://127.0.0.1:8000/answer
+```
+
+A cache hit does not call the provider. Without a configured key and model, `/answer` still returns sources and finishes with `not_configured`. `CONTEXT_CHUNKS` (default 4), `CONTEXT_TOKENS_PER_CHUNK` (300), and `MAX_OUTPUT_TOKENS` (512) bound the request; there is no daily spending tracker. Check the current [OpenRouter model pricing](https://openrouter.ai/models) before choosing a model.
+
+**Ingest the full catalog** when you want questions spanning both documentation sets:
+
+```sh
+docker compose exec app python -m scripts.enqueue_corpus
+```
+
+`POST /ingest` is another way to enqueue pages. Set `INGEST_ADMIN_KEY` in `.env`, recreate `app`, and send `X-Admin-Key` with `{"document_id":"rails:getting_started"}` or `{}` for all pages. The CLI above needs no HTTP admin key. Worker attempts and errors are stored in `ingestion_attempts`.
+
+## Storage and code map
+
+```mermaid
+erDiagram
+    documents ||--o{ chunks : contains
+    documents ||--o{ ingestion_attempts : tracks
+    documents {
+        text id PK
+        text source
+        text version
+        text title
+        text source_url
+        char content_hash
+        char ingestion_fingerprint
+    }
+    chunks {
+        text id PK
+        text document_id FK
+        integer ordinal
+        text text
+        vector embedding
+        tsvector search_vector
+    }
+    ingestion_attempts {
+        bigint id PK
+        text document_id
+        text status
+        timestamp created_at
+    }
+    llm_cache {
+        char key PK
+        text answer
+        jsonb citations
+        text model
+        text prompt_version
+    }
+```
+
+`ingestion_attempts.document_id` records the source ID without a foreign key. `llm_cache` is keyed by the normalized question, ordered chunk IDs, context hash, model, prompt version, and output cap. Its citations refer to source chunk IDs; it has no foreign key to `chunks` because cache entries may outlive a re-ingestion. [SQL migrations](db/migrations) are authoritative; [`db/schema.sql`](db/schema.sql) is a dbmate snapshot for inspection and loading a fresh database. The checked-in snapshot contains schema and migration versions, no corpus rows or credentials.
+
+| Area | Responsibility | Familiar Ruby analogue |
+| --- | --- | --- |
+| [`app/api`](app/api) | Thin FastAPI request/response adapters | Controllers |
+| [`app/ingestion`](app/ingestion) | Source parsing, chunking, embeddings, jobs, persistence | Jobs + service objects |
+| [`app/retrieval`](app/retrieval) | Vector/keyword repositories, fusion, reranking, gate | Query objects + services |
+| [`app/generation`](app/generation) | Prompt, OpenRouter client, citation check, cache workflow | API client + service object |
+| [`evals`](evals) | Offline retrieval and answer checks | Test fixtures and benchmarks |
+
+The OpenRouter client owns provider HTTP details; the answer service coordinates it with retrieval and persistence. `pyproject.toml` and `uv.lock` play the role of a Gemfile and lockfile.
+
+## Evidence and limits
+
+The [retrieval evaluation](evals/README.md) uses 50 answerable and 10 unanswerable questions over 24 selected pages (785 chunks). The table shows curated gold-document hit@5, meaning a gold page appears among the first five chunks; it does **not** measure answer correctness.
+
+| Retrieval mode | Original baseline | After keyword fallback |
+| --- | ---: | ---: |
+| Vector only | 47/50 | 47/50 |
+| Keyword only | 8/50 | 34/50 |
+| RRF hybrid | 47/50 | 44/50 |
+| Hybrid + rerank | 48/50 | 48/50 |
+
+The fallback helps the keyword branch, but final reranked hit@5 is unchanged and the intermediate fused list is noisier. With the existing threshold, the new run refused 7/10 unanswerable and 2/50 answerable questions. The threshold was calibrated before this retrieval change, on the same small question set, so those refusal counts are not a general reliability estimate. The [offline answer cases](evals/README.md#small-answer-support-check) also show one real cached answer with a valid citation marker and an unsupported claim.
+
+Reproduce checks without a paid model call:
+
+```sh
+uv run python -m evals.run_answer_evals
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy app evals
 uv run pytest
 ```
 
-The real database integration test is opt-in locally: `RUN_INTEGRATION_TESTS=1 uv run pytest -m integration`. CI runs it against PostgreSQL with pgvector. A 503 health response means the database cannot be reached. Install [dbmate](https://github.com/amacneil/dbmate) for host-based migration commands (`brew install dbmate` on macOS); the Docker path supplies it automatically.
+For the full retrieval comparison, follow [the evaluation setup](evals/README.md#run-the-retrieval-comparison). PostgreSQL integration tests are opt-in locally with `RUN_INTEGRATION_TESTS=1 uv run pytest -m integration`; CI runs them against pgvector.
 
-## Download the source corpus
+## Local development and source attribution
 
-```sh
-uv run python -m scripts.download_corpus
-```
+Install [uv](https://docs.astral.sh/uv/) and [dbmate](https://github.com/amacneil/dbmate) for host-based commands. `uv sync` installs the Python environment; `docker compose up -d db redis`, `dbmate migrate`, and `uv run uvicorn app.main:app --reload` run the API outside Compose. Set `DATABASE_URL` and `REDIS_URL` for the host, as in `.env.example`. The Compose `migrate` service applies migrations automatically. If you change the PostgreSQL host port, update both `POSTGRES_PORT` and the port in `DATABASE_URL`. Changing the initial database role or name after the data volume is created requires a new volume or manual database changes.
 
-The command fetches the 24 selected pages in [`corpus/sources.json`](corpus/sources.json) into ignored `data/raw/` and writes `data/raw/manifest.json` with URLs, versions, byte counts, and SHA-256 hashes. Repeating it reuses matching local files. Use `--refresh` to check the publisher again. A failed download does not replace the previous manifest. No model or paid API is involved.
+The catalog points to [Rails 8.1.4 source at commit `c3466ea`](https://github.com/rails/rails/tree/c3466ea00d7121798e3aa3144ffdf7174b81d8cb/guides/source) and the published [Rails 8.1 Guides](https://guides.rubyonrails.org/v8.1/). Rails uses the [MIT license](https://github.com/rails/rails/blob/v8.1.4/MIT-LICENSE). PostgreSQL pages point to the official [version 16 documentation](https://www.postgresql.org/docs/16/); that major-version URL can receive patch updates, so the local download manifest records exact bytes. PostgreSQL documentation uses the [PostgreSQL License](https://www.postgresql.org/about/licence/) (copyright © 1996–2026 The PostgreSQL Global Development Group and © 1994 The Regents of the University of California). Keep upstream attribution and notices with any redistributed corpus. This repository contains links and tooling, not downloaded pages.
 
-The Rails Guides pages are sourced from [Rails 8.1.4 at commit `c3466ea`](https://github.com/rails/rails/tree/c3466ea00d7121798e3aa3144ffdf7174b81d8cb/guides/source) and link readers to the published [Rails 8.1 Guides](https://guides.rubyonrails.org/v8.1/). Rails is [MIT licensed](https://github.com/rails/rails/blob/v8.1.4/MIT-LICENSE). The PostgreSQL pages link to the official [PostgreSQL 16 documentation](https://www.postgresql.org/docs/16/) and remain on the publisher's major-version URL, which can receive patch updates; the local manifest records the exact downloaded bytes. PostgreSQL documentation is covered by the [PostgreSQL License](https://www.postgresql.org/about/licence/) (copyright © 1996–2026 The PostgreSQL Global Development Group and © 1994 The Regents of the University of California). Keep the publishers' attribution and license notices with any redistributed corpus copy. This repository contains links and tooling, not downloaded documentation.
-
-## Parse and chunk the corpus
-
-After downloading, run:
-
-```sh
-uv run python -m scripts.prepare_corpus --max-tokens 400 --overlap-tokens 40
-```
-
-This verifies each file against the download manifest, then writes deterministic JSON Lines to ignored `data/chunks.jsonl`. Each row carries a stable chunk ID, document hash, title, section path, source URL, text, and local token count. The parser keeps Rails heading structure and Markdown code blocks; it removes PostgreSQL page navigation while retaining heading anchors, links, and code examples. Chunks stay within the configured token cap except when a single code block is larger; that block remains intact. The overlap copies trailing prose into the next chunk. Repeating the command on unchanged inputs produces identical bytes. This step uses a local tokenizer and makes no model calls.
-
-## Ingest into PostgreSQL
-
-The worker fetches each selected page, parses and chunks it, embeds each chunk locally with [FastEmbed's 384-dimensional BGE small model](https://qdrant.github.io/fastembed/examples/Supported_Models/), then stores it in PostgreSQL with pgvector and full-text search indexes. The embedding text includes the page title and heading path. The first job downloads the model into ignored `models/` (a Docker volume in Compose); later jobs reuse it. No paid LLM API is called.
-
-With Compose running, enqueue one page or the full catalog:
-
-```sh
-docker compose exec app python -m scripts.enqueue_corpus --document-id rails:getting_started
-docker compose exec app python -m scripts.enqueue_corpus
-docker compose logs -f worker
-```
-
-For a host-based worker, run `uv run rq worker ingestion --url redis://localhost:6379/0 --with-scheduler --worker-class rq.worker.SpawnWorker` after setting `DATABASE_URL` and starting Redis. SpawnWorker is compatible with macOS and the local embedding runtime. Jobs retry up to three times with short delays. Each attempt records `completed`, `skipped`, or `failed` with its document ID in `ingestion_attempts`. To inspect failures in Compose:
-
-```sh
-docker compose exec db psql -U ask -d ask_the_docs -c "SELECT document_id, status, detail, created_at FROM ingestion_attempts WHERE status = 'failed' ORDER BY created_at DESC LIMIT 20"
-```
-
-Re-ingesting a page checks a fingerprint of its source bytes, source metadata, model name, chunk settings, and pipeline version. An unchanged page skips embedding and database replacement. A changed page replaces its chunks in one transaction. The page and chunk metadata remain available for the retrieval feature.
-
-`POST /ingest` can enqueue one `{"document_id": "rails:getting_started"}` or all pages with `{}`. It is disabled until `INGEST_ADMIN_KEY` is set to a private random value in `.env`; send that value in the `X-Admin-Key` header. The CLI above works without the HTTP admin key. If you change the database host port, update both `POSTGRES_PORT` and the port in `DATABASE_URL` in `.env`. PostgreSQL creates its initial role and database only when the data volume is empty; changing those settings later does not update an existing volume.
-
-## Inspect hybrid retrieval
-
-After a worker has ingested at least one page, query its stored chunks:
-
-```sh
-curl --fail --silent --show-error \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"How do PostgreSQL indexes help queries?","top_k":5}' \
-  http://127.0.0.1:8000/query
-```
-
-`POST /query` embeds the question locally with the same model as ingestion and retrieves up to 30 vector candidates and 30 PostgreSQL full-text candidates. Keyword search uses `websearch_to_tsquery`, so quoted phrases and terms such as `OR` work as web-style search syntax. Reciprocal rank fusion (RRF, default `k=60`) combines the two ordered lists. The top 20 fused candidates are scored by [FastEmbed's local MiniLM cross-encoder](https://qdrant.github.io/fastembed/examples/Supported_Models/), using the question, title, section path, and passage text. The endpoint returns the best `top_k` unique chunks with their document ID, title, section path, source URL, and text. `top_k` defaults to 5 and is limited to 1–20; questions are limited to 500 characters. The cross-encoder downloads into ignored `models/` on the first query, then reuses that cache. An empty corpus returns an empty `results` list, and a question with no keyword matches can still return vector results.
-
-Each result includes `rerank_score`, `rrf_score`, one-based `vector_rank` and `keyword_rank`, `cosine_distance`, and `fts_rank`. A missing rank or score is `null` when a chunk came from only one search. Higher cross-encoder scores determine the final order; these raw scores are not probabilities or calibrated confidence values. The candidate limits, fusion constant, model, and rerank limit can be changed with `TOP_K_VECTOR`, `TOP_K_FTS`, `RRF_K`, `RERANK_MODEL`, and `RERANK_TOP_N` in `.env`.
-
-The response also includes `gated`, `gate_reason`, `gate_threshold`, and `refusal`. No sources produce a canned refusal. The default score threshold is **1.5**, selected by the [gate calibration study](evals/README.md#gate-calibration-study): it refused 7 of 10 unsupported questions while incorrectly refusing 1 of 50 answerable questions on the same small evaluation set. A score strictly below the threshold produces the canned refusal. Set `GATE_THRESHOLD` to another finite number to experiment, or `GATE_THRESHOLD=off` to disable score gating. Recalibrate after changing the corpus, reranker model, or retrieval settings. A gated response still includes its closest sources. The endpoint returns sources for inspection and does not generate an answer or call an LLM.
-
-## Generate a cited answer
-
-`POST /answer` uses the same local retrieval and gate as `/query`, then streams server-sent events. The default `.env` has no OpenRouter key or model, so it makes no provider call.
-
-```sh
-curl -N --fail --silent --show-error \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"How do PostgreSQL indexes help queries?"}' \
-  http://127.0.0.1:8000/answer
-```
-
-The stream sends `sources`, then zero or more `token` events, then one `done` event. Token events are **provisional**. A client should display the answer as final only when `done.status` is `generated` or `cached`; an invalid citation, provider error, or interrupted stream leaves only the retrieved sources. The final event includes citation metadata, `cached`, `refusal`, and `degraded`. The JSON `/query` endpoint remains available for inspecting retrieval without generation.
-
-To opt in to live generation, set `OPENROUTER_API_KEY` and `LLM_MODEL` in your ignored `.env`. Choose a specific model and check its current [OpenRouter model pricing](https://openrouter.ai/models). `CONTEXT_CHUNKS` (default 4) and `CONTEXT_TOKENS_PER_CHUNK` (default 300) bound supplied passages; `MAX_OUTPUT_TOKENS` defaults to 512. The request uses temperature 0. This app does not set a daily call or spending limit.
-
-Successful answers are cached in PostgreSQL by normalized question, exact ordered chunk IDs and context hash, model, prompt version, and output cap. Cached replies make no new provider call. Two simultaneous cache misses may each call the provider; only one answer is stored. The answer prompt treats retrieved passages as untrusted data, asks for numbered citations, and checks that every cited marker names a supplied source. Marker validity does not prove that a claim is supported; answer-quality checks are the next planned feature.
-
-For Ruby developers: `pyproject.toml` plus `uv.lock` serve the role of a Gemfile and lockfile. `app/main.py` assembles the FastAPI application; `app/api` contains thin HTTP routes. `app/generation/openrouter_client.py` owns provider HTTP behavior, while `app/generation/service.py` coordinates the workflow and `app/generation/repository.py` owns persistence, matching the client and service-object separation used in Ruby.
-
-## License
-
-The service code is MIT licensed. The upstream documentation keeps its own license and attribution.
+The service code is MIT licensed. Development happens in [small, focused PRs](AGENTS.md), each explaining What, Why, and How.
