@@ -34,3 +34,20 @@ DATABASE_URL='postgresql://ask:ask@localhost:55432/ask_the_docs?sslmode=disable'
 `seed_corpus` verifies the downloaded manifest and files, then ingests them directly with the same parser, chunker, embedder, and repository as the worker. It does not need Redis or source HTTP fetches; the embedding and reranking models may need a one-time download if they are not cached. The evaluator refuses a database with missing or extra documents, records a corpus fingerprint and model/settings metadata, and writes `evals/results/retrieval.json`. It compares vector-only, keyword-only, RRF hybrid, and hybrid plus local reranking on the same question set. No paid model is called.
 
 Hit rate@k means at least one gold document appears among the first *k chunks*. Recall@k is the fraction of gold documents seen there; MRR@k is the reciprocal rank of the first gold-document chunk. Multiple chunks from one document occupy multiple ranks but give no extra recall. Unanswerable questions are excluded from retrieval accuracy and reported separately as gate outcomes. With the default unset threshold, the gate should usually refuse only questions returning no sources; calibration comes in the next feature.
+
+## First run: 2026-10-01
+
+The committed [JSON report](results/retrieval.json) used 24 pages, 785 chunks, and all 60 questions. Its corpus fingerprint is `5626b48eef5578ead0ab3a47e2a7c4d100c239c5bf17970ad463a350e215df29`; the report also records the dataset hash, model names, settings, per-question rankings, and raw best rerank scores. The table below uses only the 50 answerable questions. A hit means a curated gold *document* appeared in the first *k chunks*; it does not measure answer correctness.
+
+| Retrieval mode | Hit@1 | Hit@5 | Hit@10 | Recall@5 | MRR@5 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Vector only | 40/50 | 47/50 | 48/50 | 0.92 | 0.855 |
+| Keyword only | 8/50 | 8/50 | 8/50 | 0.16 | 0.160 |
+| RRF hybrid | 40/50 | 47/50 | 48/50 | 0.92 | 0.852 |
+| Hybrid + rerank | 43/50 | 48/50 | 49/50 | 0.94 | 0.903 |
+
+The reranker moved one additional question's gold page into the top five and three into rank one compared with hybrid search. This small, curated set is useful for finding regressions, not for claiming general performance. The keyword query returned no matches for 40 of 50 answerable questions. The current `websearch_to_tsquery` receives the whole natural-language question; its conjunction of content terms is often too restrictive for a single chunk. Hybrid retrieval therefore behaved much like vector-only retrieval here. Query formulation is a concrete follow-up to test.
+
+The two reranked top-five misses were Q015 and Q025. Q015's gold label points to the Rails validation guide, while the top results came from other Rails pages; the labels are primary reference pages rather than a complete list of relevant pages. For Q025, the gold PostgreSQL indexes overview reached rank eight, behind related index pages. Reviewing those passages and adding relevance judgments would make the evaluation stronger.
+
+With the threshold unset, the gate refused 0 of 10 unanswerable questions and incorrectly refused 0 of 50 answerable questions. These are expected baseline counts, not evidence that the system answers unsupported questions safely. The next feature should calibrate a threshold against these labels and inspect the overlap between positive and negative score distributions. Do not treat raw reranker scores as probabilities.
