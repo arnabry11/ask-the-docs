@@ -24,7 +24,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The dbmate container applies migrations before the app starts. `GET http://127.0.0.1:8000/health` checks its database connection. PostgreSQL is available on port 5432 for local development; Redis runs inside the Compose network and will support the later ingestion worker. The example credentials are for local development only.
+The dbmate container applies migrations before the app starts. `GET http://127.0.0.1:8000/health` checks its database connection. PostgreSQL is available on host port 55432 for local development; Redis runs inside the Compose network and will support the later ingestion worker. The example credentials are for local development only.
 
 ## Run the API locally
 
@@ -89,7 +89,7 @@ docker compose exec db psql -U ask -d ask_the_docs -c "SELECT document_id, statu
 
 Re-ingesting a page checks a fingerprint of its source bytes, source metadata, model name, chunk settings, and pipeline version. An unchanged page skips embedding and database replacement. A changed page replaces its chunks in one transaction. The page and chunk metadata remain available for the retrieval feature.
 
-`POST /ingest` can enqueue one `{"document_id": "rails:getting_started"}` or all pages with `{}`. It is disabled until `INGEST_ADMIN_KEY` is set to a private random value in `.env`; send that value in the `X-Admin-Key` header. The CLI above works without the HTTP admin key. The database host port can be changed with `POSTGRES_PORT` if 5432 is already in use.
+`POST /ingest` can enqueue one `{"document_id": "rails:getting_started"}` or all pages with `{}`. It is disabled until `INGEST_ADMIN_KEY` is set to a private random value in `.env`; send that value in the `X-Admin-Key` header. The CLI above works without the HTTP admin key. If you change the database host port, update both `POSTGRES_PORT` and the port in `DATABASE_URL` in `.env`. PostgreSQL creates its initial role and database only when the data volume is empty; changing those settings later does not update an existing volume.
 
 ## Inspect hybrid retrieval
 
