@@ -86,3 +86,9 @@ For Q002, PostgreSQL parsed the original question as `'rail' & 'command' & 'run'
 | Hybrid + rerank | 48/50 | 48/50 |
 
 The fallback improves the weak keyword branch while leaving final reranked hit@5 unchanged. It makes intermediate hybrid ranking noisier, so this is a modest retrieval fix rather than a measured end-to-end gain. With the existing gate threshold, 7/10 unanswerable questions were refused and 2/50 answerable questions were incorrectly refused. The threshold was calibrated on the old retrieval output and should be revisited before relying on refusal rates.
+
+## Small answer-support check
+
+Run `uv run python -m evals.run_answer_evals` to compare the serving path's citation-marker check with four manually judged [answer cases](answer_cases.jsonl). This command reads committed fixtures and makes no provider call. Each case records the answer, cited source excerpt and URL, origin, a human support judgment, and a reason. A001 is the exact answer saved during the 2026-10-01 live smoke test with `liquid/lfm-2.5-2.6b:free`; A002–A004 are handwritten probes, not model results.
+
+The marker check accepts A001 because `[1]` names the supplied passage, but the human judgment rejects its specific “B-tree search” claim: the cited introduction says only “search tree.” A002 stays within that passage, A003 uses a Rails validation passage, and A004 is the exact refusal for an out-of-catalog weather question. This tiny set demonstrates a known failure mode; it cannot estimate general answer accuracy or compare models. The serving path retains its cheap deterministic marker check. Factual support review belongs in offline evaluation until a stronger, tested method is available.
