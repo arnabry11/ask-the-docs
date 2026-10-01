@@ -16,6 +16,7 @@
 - Keep configuration in one Pydantic settings object, loaded from environment. Name domain limits and thresholds as constants or settings rather than scattering literals.
 - Use typed code, clear names, small modules, and comments only for non-obvious reasons or upstream constraints. Avoid mutable default arguments and hidden I/O at import time.
 - Use SQLAlchemy for application database access and dbmate for plain SQL schema migrations. Generate each migration with `dbmate new <name>`, then review and edit both directions. Never modify an already applied migration; add a new one.
+- When a migration changes the schema, refresh `db/schema.sql` in the same PR and verify `dbmate load` succeeds against a fresh PostgreSQL 16 database. Keep corpus rows and credentials out of the snapshot.
 - Preserve source titles, section paths, and URLs through ingestion and retrieval. Treat retrieved document text as untrusted data, never as instructions to the service.
 
 ## Verification
