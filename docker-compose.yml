@@ -3,8 +3,26 @@ services:
     build: .
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ask}:${POSTGRES_PASSWORD:-ask}@db:5432/${POSTGRES_DB:-ask_the_docs}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      INGEST_ADMIN_KEY: ${INGEST_ADMIN_KEY:-}
     ports:
       - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: ["rq", "worker", "ingestion", "--url", "redis://redis:6379/0", "--with-scheduler", "--worker-class", "rq.worker.SpawnWorker"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ask}:${POSTGRES_PASSWORD:-ask}@db:5432/${POSTGRES_DB:-ask_the_docs}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - model_cache:/app/models
     depends_on:
       db:
         condition: service_healthy
@@ -31,7 +49,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ask}
       POSTGRES_DB: ${POSTGRES_DB:-ask_the_docs}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -53,3 +71,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  model_cache:

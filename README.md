@@ -2,7 +2,7 @@
 
 A Python and FastAPI service for answering questions about the Rails Guides and PostgreSQL documentation with cited sources. The project will measure retrieval quality, control paid model use, and show the engineering behind a production style RAG system.
 
-The first milestone is the service foundation. Search, ingestion, answer generation, and evaluation will arrive in separate reviewable PRs. No paid model calls are made by the foundation.
+The service foundation, corpus preparation, and local ingestion are in place. Retrieval, answer generation, and evaluation will arrive in separate reviewable PRs. Ingestion makes no paid model calls.
 
 ## Planned request flow
 
@@ -68,6 +68,28 @@ uv run python -m scripts.prepare_corpus --max-tokens 400 --overlap-tokens 40
 ```
 
 This verifies each file against the download manifest, then writes deterministic JSON Lines to ignored `data/chunks.jsonl`. Each row carries a stable chunk ID, document hash, title, section path, source URL, text, and local token count. The parser keeps Rails heading structure and Markdown code blocks; it removes PostgreSQL page navigation while retaining heading anchors, links, and code examples. Chunks stay within the configured token cap except when a single code block is larger; that block remains intact. The overlap copies trailing prose into the next chunk. Repeating the command on unchanged inputs produces identical bytes. This step uses a local tokenizer and makes no model calls.
+
+## Ingest into PostgreSQL
+
+The worker fetches each selected page, parses and chunks it, embeds each chunk locally with [FastEmbed's 384-dimensional BGE small model](https://qdrant.github.io/fastembed/examples/Supported_Models/), then stores it in PostgreSQL with pgvector and full-text search indexes. The embedding text includes the page title and heading path. The first job downloads the model into ignored `models/` (a Docker volume in Compose); later jobs reuse it. No paid LLM API is called.
+
+With Compose running, enqueue one page or the full catalog:
+
+```sh
+docker compose exec app python -m scripts.enqueue_corpus --document-id rails:getting_started
+docker compose exec app python -m scripts.enqueue_corpus
+docker compose logs -f worker
+```
+
+For a host-based worker, run `uv run rq worker ingestion --url redis://localhost:6379/0 --with-scheduler --worker-class rq.worker.SpawnWorker` after setting `DATABASE_URL` and starting Redis. SpawnWorker is compatible with macOS and the local embedding runtime. Jobs retry up to three times with short delays. Each attempt records `completed`, `skipped`, or `failed` with its document ID in `ingestion_attempts`. To inspect failures in Compose:
+
+```sh
+docker compose exec db psql -U ask -d ask_the_docs -c "SELECT document_id, status, detail, created_at FROM ingestion_attempts WHERE status = 'failed' ORDER BY created_at DESC LIMIT 20"
+```
+
+Re-ingesting a page checks a fingerprint of its source bytes, source metadata, model name, chunk settings, and pipeline version. An unchanged page skips embedding and database replacement. A changed page replaces its chunks in one transaction. The page and chunk metadata remain available for the retrieval feature.
+
+`POST /ingest` can enqueue one `{"document_id": "rails:getting_started"}` or all pages with `{}`. It is disabled until `INGEST_ADMIN_KEY` is set to a private random value in `.env`; send that value in the `X-Admin-Key` header. The CLI above works without the HTTP admin key. The database host port can be changed with `POSTGRES_PORT` if 5432 is already in use.
 
 For Ruby developers: `pyproject.toml` plus `uv.lock` serve the role of a Gemfile and lockfile. `app/main.py` assembles the FastAPI application; `app/api` contains thin HTTP routes. Later domain services and external API clients will stay outside routes, like service objects and client/resource classes in Ruby.
 
