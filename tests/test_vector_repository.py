@@ -71,7 +71,7 @@ def test_vector_search_rejects_invalid_limits_and_vectors() -> None:
     with pytest.raises(ValueError, match="limit"):
         reader.search([1.0] * 384, 0)
     with pytest.raises(ValueError, match="limit"):
-        reader.search([1.0] * 384, 21)
+        reader.search([1.0] * 384, 31)
     with pytest.raises(ValueError, match="nonzero"):
         reader.search([0.0] * 384, 5)
     with pytest.raises(ValueError, match="384"):

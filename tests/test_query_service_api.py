@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.ingestion import embed as embed_module
 from app.ingestion.embed import FastEmbedClient
 from app.main import create_app
+from app.retrieval.keyword_repository import KeywordMatch
 from app.retrieval.service import QueryService, get_query_service
 from app.retrieval.vector_repository import RetrievedChunk
 
@@ -21,13 +22,23 @@ class FakeEmbedder:
         return self.vector
 
 
-class FakeSearcher:
+class FakeVectorSearcher:
     def __init__(self, results: list[RetrievedChunk] | None = None) -> None:
         self.results = results if results is not None else []
         self.calls: list[tuple[list[float], int]] = []
 
     def search(self, vector: list[float], limit: int) -> list[RetrievedChunk]:
         self.calls.append((vector, limit))
+        return self.results
+
+
+class FakeKeywordSearcher:
+    def __init__(self, results: list[KeywordMatch] | None = None) -> None:
+        self.results = results if results is not None else []
+        self.calls: list[tuple[str, int]] = []
+
+    def search(self, question: str, limit: int) -> list[KeywordMatch]:
+        self.calls.append((question, limit))
         return self.results
 
 
@@ -46,20 +57,45 @@ def sample_chunk() -> RetrievedChunk:
     )
 
 
+def sample_keyword_match() -> KeywordMatch:
+    chunk = sample_chunk()
+    return KeywordMatch(
+        chunk_id=chunk.chunk_id,
+        document_id=chunk.document_id,
+        source=chunk.source,
+        version=chunk.version,
+        title=chunk.title,
+        section_path=chunk.section_path,
+        source_url=chunk.source_url,
+        text=chunk.text,
+        token_count=chunk.token_count,
+        fts_rank=0.25,
+    )
+
+
 def test_query_service_embeds_normalized_question_and_returns_sources() -> None:
     embedder = FakeEmbedder()
-    searcher = FakeSearcher([sample_chunk()])
+    vector_searcher = FakeVectorSearcher([sample_chunk()])
+    keyword_searcher = FakeKeywordSearcher([sample_keyword_match()])
 
-    result = QueryService(embedder, searcher).call("  How   do I find records?  ", top_k=3)
+    result = QueryService(embedder, vector_searcher, keyword_searcher).call(
+        "  How   do I find records?  ", top_k=3
+    )
 
     assert result.question == "How do I find records?"
-    assert result.chunks == (sample_chunk(),)
+    assert len(result.chunks) == 1
+    assert result.chunks[0].chunk_id == sample_chunk().chunk_id
+    assert result.chunks[0].vector_rank == 1
+    assert result.chunks[0].keyword_rank == 1
     assert embedder.questions == ["How do I find records?"]
-    assert searcher.calls == [(embedder.vector, 3)]
+    assert vector_searcher.calls == [(embedder.vector, 30)]
+    assert keyword_searcher.calls == [("How do I find records?", 30)]
 
 
 def test_query_service_returns_empty_list_for_empty_corpus() -> None:
-    result = QueryService(FakeEmbedder(), FakeSearcher()).call("What is an index?")
+    result = QueryService(FakeEmbedder(), FakeVectorSearcher(), FakeKeywordSearcher()).call(
+        "What is an index?"
+    )
 
     assert result.chunks == ()
 
@@ -70,16 +106,22 @@ def test_query_service_returns_empty_list_for_empty_corpus() -> None:
 )
 def test_query_service_rejects_invalid_requests_before_embedding(question: str, top_k: int) -> None:
     embedder = FakeEmbedder()
+    vector_searcher = FakeVectorSearcher()
+    keyword_searcher = FakeKeywordSearcher()
     with pytest.raises(ValueError):
-        QueryService(embedder, FakeSearcher()).call(question, top_k)
+        QueryService(embedder, vector_searcher, keyword_searcher).call(question, top_k)
     assert embedder.questions == []
+    assert vector_searcher.calls == []
+    assert keyword_searcher.calls == []
 
 
 def test_query_service_rejects_invalid_embedding() -> None:
-    searcher = FakeSearcher()
+    vector_searcher = FakeVectorSearcher()
+    keyword_searcher = FakeKeywordSearcher()
     with pytest.raises(ValueError, match="384"):
-        QueryService(FakeEmbedder([0.0] * 384), searcher).call("valid")
-    assert searcher.calls == []
+        QueryService(FakeEmbedder([0.0] * 384), vector_searcher, keyword_searcher).call("valid")
+    assert vector_searcher.calls == []
+    assert keyword_searcher.calls == []
 
 
 def test_fastembed_adapter_uses_query_embedding_method(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -100,27 +142,32 @@ def test_fastembed_adapter_uses_query_embedding_method(monkeypatch: pytest.Monke
 
 
 @pytest.fixture
-def api_client() -> Iterator[tuple[TestClient, FakeEmbedder, FakeSearcher]]:
+def api_client() -> Iterator[
+    tuple[TestClient, FakeEmbedder, FakeVectorSearcher, FakeKeywordSearcher]
+]:
     app = create_app()
     embedder = FakeEmbedder()
-    searcher = FakeSearcher([sample_chunk()])
-    app.dependency_overrides[get_query_service] = lambda: QueryService(embedder, searcher)
+    vector_searcher = FakeVectorSearcher([sample_chunk()])
+    keyword_searcher = FakeKeywordSearcher([sample_keyword_match()])
+    app.dependency_overrides[get_query_service] = lambda: QueryService(
+        embedder, vector_searcher, keyword_searcher
+    )
     with TestClient(app) as client:
-        yield client, embedder, searcher
+        yield client, embedder, vector_searcher, keyword_searcher
     app.dependency_overrides.clear()
 
 
 def test_query_api_returns_ranked_chunk_metadata(
-    api_client: tuple[TestClient, FakeEmbedder, FakeSearcher],
+    api_client: tuple[TestClient, FakeEmbedder, FakeVectorSearcher, FakeKeywordSearcher],
 ) -> None:
-    client, embedder, searcher = api_client
+    client, embedder, vector_searcher, keyword_searcher = api_client
 
     response = client.post("/query", json={"question": "  finding records  ", "top_k": 1})
 
     assert response.status_code == 200
     body = response.json()
     assert body["question"] == "finding records"
-    assert body["retrieval"] == "vector"
+    assert body["retrieval"] == "hybrid"
     assert len(body["results"]) == 1
     assert body["results"][0]["section_path"] == [
         "Active Record Query Interface",
@@ -128,8 +175,13 @@ def test_query_api_returns_ranked_chunk_metadata(
     ]
     assert body["results"][0]["source_url"].endswith("#finding-records")
     assert body["results"][0]["cosine_distance"] == 0.12
+    assert body["results"][0]["fts_rank"] == 0.25
+    assert body["results"][0]["vector_rank"] == 1
+    assert body["results"][0]["keyword_rank"] == 1
+    assert body["results"][0]["rrf_score"] == pytest.approx(2 / 61)
     assert embedder.questions == ["finding records"]
-    assert searcher.calls[0][1] == 1
+    assert vector_searcher.calls[0][1] == 30
+    assert keyword_searcher.calls == [("finding records", 30)]
 
 
 @pytest.mark.parametrize(
@@ -137,9 +189,10 @@ def test_query_api_returns_ranked_chunk_metadata(
     [{"question": "   "}, {"question": "x" * 501}, {"question": "valid", "top_k": 21}],
 )
 def test_query_api_rejects_invalid_input(
-    api_client: tuple[TestClient, FakeEmbedder, FakeSearcher], payload: dict[str, object]
+    api_client: tuple[TestClient, FakeEmbedder, FakeVectorSearcher, FakeKeywordSearcher],
+    payload: dict[str, object],
 ) -> None:
-    client, embedder, _ = api_client
+    client, embedder, _, _ = api_client
 
     response = client.post("/query", json=payload)
 
