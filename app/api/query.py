@@ -37,12 +37,16 @@ class SourceChunk(BaseModel):
     source_url: str
     text: str
     token_count: int
-    cosine_distance: float
+    rrf_score: float
+    vector_rank: int | None
+    keyword_rank: int | None
+    cosine_distance: float | None
+    fts_rank: float | None
 
 
 class QueryResponse(BaseModel):
     question: str
-    retrieval: str = "vector"
+    retrieval: str = "hybrid"
     results: list[SourceChunk]
 
 
@@ -53,6 +57,6 @@ def query(
     result = service.call(request.question, request.top_k)
     return {
         "question": result.question,
-        "retrieval": "vector",
+        "retrieval": "hybrid",
         "results": [asdict(chunk) for chunk in result.chunks],
     }

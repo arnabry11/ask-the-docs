@@ -2,7 +2,7 @@
 
 A Python and FastAPI service for answering questions about the Rails Guides and PostgreSQL documentation with cited sources. The project will measure retrieval quality, control paid model use, and show the engineering behind a production style RAG system.
 
-The service foundation, corpus preparation, local ingestion, and a vector retrieval baseline are in place. Hybrid retrieval, answer generation, and evaluation will arrive in separate reviewable PRs. Ingestion and retrieval make no paid model calls.
+The service foundation, corpus preparation, local ingestion, and hybrid retrieval are in place. Reranking, answer generation, and evaluation will arrive in separate reviewable PRs. Ingestion and retrieval make no paid model calls.
 
 ## Planned request flow
 
@@ -91,7 +91,7 @@ Re-ingesting a page checks a fingerprint of its source bytes, source metadata, m
 
 `POST /ingest` can enqueue one `{"document_id": "rails:getting_started"}` or all pages with `{}`. It is disabled until `INGEST_ADMIN_KEY` is set to a private random value in `.env`; send that value in the `X-Admin-Key` header. The CLI above works without the HTTP admin key. The database host port can be changed with `POSTGRES_PORT` if 5432 is already in use.
 
-## Inspect vector retrieval
+## Inspect hybrid retrieval
 
 After a worker has ingested at least one page, query its stored chunks:
 
@@ -102,7 +102,9 @@ curl --fail --silent --show-error \
   http://127.0.0.1:8000/query
 ```
 
-`POST /query` embeds the question locally with the same model as ingestion and returns ranked chunks with their document ID, title, section path, source URL, text, and cosine distance. `top_k` defaults to 5 and is limited to 1–20; questions are limited to 500 characters. An empty corpus returns an empty `results` list. Lower cosine distance means closer vectors; it is a ranking value, not a calibrated confidence score. The endpoint returns source material for inspection and does not generate an answer or call an LLM. Hybrid keyword search, reranking, and a calibrated refusal gate come later.
+`POST /query` embeds the question locally with the same model as ingestion and retrieves up to 30 vector candidates and 30 PostgreSQL full-text candidates. Keyword search uses `websearch_to_tsquery`, so quoted phrases and terms such as `OR` work as web-style search syntax. Reciprocal rank fusion (RRF, default `k=60`) combines the two ordered lists and returns the best `top_k` unique chunks with their document ID, title, section path, source URL, and text. `top_k` defaults to 5 and is limited to 1–20; questions are limited to 500 characters. An empty corpus returns an empty `results` list, and a question with no keyword matches can still return vector results.
+
+Each result includes `rrf_score`, one-based `vector_rank` and `keyword_rank`, `cosine_distance`, and `fts_rank`. A missing rank or score is `null` when a chunk came from only one search. Higher RRF scores determine the final order; neither RRF nor individual search scores are calibrated confidence values. The candidate limits and RRF constant can be changed with `TOP_K_VECTOR`, `TOP_K_FTS`, and `RRF_K` in `.env`. The endpoint returns sources for inspection and does not generate an answer or call an LLM. Reranking and a calibrated refusal gate come later.
 
 For Ruby developers: `pyproject.toml` plus `uv.lock` serve the role of a Gemfile and lockfile. `app/main.py` assembles the FastAPI application; `app/api` contains thin HTTP routes. Later domain services and external API clients will stay outside routes, like service objects and client/resource classes in Ruby.
 
