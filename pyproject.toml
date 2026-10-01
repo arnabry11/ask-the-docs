@@ -1,7 +1,7 @@
 [project]
 name = "ask-the-docs"
 version = "0.1.0"
-description = "A measured, cost-aware RAG service for public technical documentation"
+description = "A cited RAG service for public technical documentation"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
