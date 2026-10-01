@@ -49,6 +49,16 @@ uv run pytest
 
 The real database integration test is opt-in locally: `RUN_INTEGRATION_TESTS=1 uv run pytest -m integration`. CI runs it against PostgreSQL with pgvector. A 503 health response means the database cannot be reached. Install [dbmate](https://github.com/amacneil/dbmate) for host-based migration commands (`brew install dbmate` on macOS); the Docker path supplies it automatically.
 
+## Download the source corpus
+
+```sh
+uv run python -m scripts.download_corpus
+```
+
+The command fetches the 24 selected pages in [`corpus/sources.json`](corpus/sources.json) into ignored `data/raw/` and writes `data/raw/manifest.json` with URLs, versions, byte counts, and SHA-256 hashes. Repeating it reuses matching local files. Use `--refresh` to check the publisher again. A failed download does not replace the previous manifest. No model or paid API is involved.
+
+The Rails Guides pages are sourced from [Rails 8.1.4 at commit `c3466ea`](https://github.com/rails/rails/tree/c3466ea00d7121798e3aa3144ffdf7174b81d8cb/guides/source) and link readers to the published [Rails 8.1 Guides](https://guides.rubyonrails.org/v8.1/). Rails is [MIT licensed](https://github.com/rails/rails/blob/v8.1.4/MIT-LICENSE). The PostgreSQL pages link to the official [PostgreSQL 16 documentation](https://www.postgresql.org/docs/16/) and remain on the publisher's major-version URL, which can receive patch updates; the local manifest records the exact downloaded bytes. PostgreSQL documentation is covered by the [PostgreSQL License](https://www.postgresql.org/about/licence/) (copyright © 1996–2026 The PostgreSQL Global Development Group and © 1994 The Regents of the University of California). Keep the publishers' attribution and license notices with any redistributed corpus copy. This repository contains links and tooling, not downloaded documentation.
+
 For Ruby developers: `pyproject.toml` plus `uv.lock` serve the role of a Gemfile and lockfile. `app/main.py` assembles the FastAPI application; `app/api` contains thin HTTP routes. Later domain services and external API clients will stay outside routes, like service objects and client/resource classes in Ruby.
 
 The source corpus is fetched from its original publishers at development time. It is not committed to this repository. [Ruby on Rails is MIT licensed](https://github.com/rails/rails/blob/main/MIT-LICENSE); [PostgreSQL's license](https://www.postgresql.org/about/licence/) permits use of its documentation with attribution. Any downloader must retain source URLs and required notices.
