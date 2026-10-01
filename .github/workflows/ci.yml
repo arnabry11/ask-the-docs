@@ -42,3 +42,15 @@ jobs:
       - run: "$RUNNER_TEMP/dbmate --no-dump-schema migrate"
       - run: uv run pytest -q
       - run: docker build -t ask-the-docs:test .
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: docker compose up --build -d
+      - name: Check migrated app startup
+        run: curl --fail --retry 20 --retry-connrefused --retry-delay 2 http://127.0.0.1:8000/health
+      - if: failure()
+        run: docker compose logs
+      - if: always()
+        run: docker compose down -v
