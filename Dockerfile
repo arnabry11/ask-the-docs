@@ -9,6 +9,8 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --locked --no-dev --no-install-project
 
 COPY app ./app
+COPY corpus ./corpus
+COPY scripts ./scripts
 
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
