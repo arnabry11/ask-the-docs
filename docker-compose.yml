@@ -1,0 +1,55 @@
+services:
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ask}:${POSTGRES_PASSWORD:-ask}@db:5432/${POSTGRES_DB:-ask_the_docs}?sslmode=disable
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  migrate:
+    image: ghcr.io/amacneil/dbmate:2.36.0
+    command: ["--no-dump-schema", "migrate"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ask}:${POSTGRES_PASSWORD:-ask}@db:5432/${POSTGRES_DB:-ask_the_docs}?sslmode=disable
+    volumes:
+      - ./db/migrations:/db/migrations:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: pgvector/pgvector:0.8.6-pg16-trixie
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ask}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ask}
+      POSTGRES_DB: ${POSTGRES_DB:-ask_the_docs}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:
