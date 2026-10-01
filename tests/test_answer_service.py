@@ -109,9 +109,23 @@ def test_successful_answer_is_cached_and_replayed_without_a_second_provider_call
     first = list(workflow.stream("  How  do indexes work? "))
     second = list(workflow.stream("How do indexes work?"))
 
-    assert [event.name for event in first] == ["sources", "token", "done"]
-    assert first[0].data["sources"][0]["source_url"].endswith("#indexes")
-    assert first[1].data == {"text": "An index speeds lookups [1].", "provisional": True}
+    assert [event.name for event in first] == [
+        "progress",
+        "sources",
+        "progress",
+        "progress",
+        "token",
+        "progress",
+        "done",
+    ]
+    assert [event.data["stage"] for event in first if event.name == "progress"] == [
+        "searching",
+        "reviewing",
+        "writing",
+        "checking_citations",
+    ]
+    assert first[1].data["sources"][0]["source_url"].endswith("#indexes")
+    assert first[4].data == {"text": "An index speeds lookups [1].", "provisional": True}
     assert first[-1].data["status"] == "generated"
     assert first[-1].data["citations"][0]["chunk_id"] == "rails:guide:chunk"
     assert second[-1].data["status"] == "cached"
@@ -190,7 +204,14 @@ def test_midstream_error_keeps_tokens_provisional_and_does_not_cache() -> None:
 
     events = list(service(store=store, provider=provider).stream("Question?"))
 
-    assert [event.name for event in events] == ["sources", "token", "done"]
+    assert [event.name for event in events] == [
+        "progress",
+        "sources",
+        "progress",
+        "progress",
+        "token",
+        "done",
+    ]
     assert events[-1].data["status"] == "provider_error"
     assert events[-1].data["answer"] is None
     assert store.saves == 0
@@ -200,8 +221,13 @@ def test_client_disconnect_closes_provider_stream() -> None:
     provider = FakeProvider()
     stream = service(provider=provider).stream("Question?")
 
-    assert next(stream).name == "sources"
-    assert next(stream).name == "token"
+    assert [next(stream).name for _ in range(5)] == [
+        "progress",
+        "sources",
+        "progress",
+        "progress",
+        "token",
+    ]
     stream.close()
 
     assert provider.closed is True

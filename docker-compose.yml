@@ -4,6 +4,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ask}:${POSTGRES_PASSWORD:-ask}@db:5432/${POSTGRES_DB:-ask_the_docs}?sslmode=disable
       REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
       INGEST_ADMIN_KEY: ${INGEST_ADMIN_KEY:-}
       TOP_K_VECTOR: ${TOP_K_VECTOR:-30}
       TOP_K_FTS: ${TOP_K_FTS:-30}

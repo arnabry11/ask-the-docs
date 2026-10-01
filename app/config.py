@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     app_name: str = "Ask the Docs"
     database_url: str = "postgresql://ask:ask@localhost:5432/ask_the_docs?sslmode=disable"
     redis_url: str = "redis://localhost:6379/0"
+    cors_origins: str = ""
     ingest_admin_key: str = ""
     top_k_vector: int = Field(default=30, ge=1, le=30)
     top_k_fts: int = Field(default=30, ge=1, le=30)

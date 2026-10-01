@@ -43,6 +43,7 @@ class AnswerService:
         self.max_output_tokens = max_output_tokens
 
     def stream(self, question: str) -> Iterator[AnswerEvent]:
+        yield AnswerEvent("progress", {"stage": "searching", "message": "Searching documentation"})
         retrieved = self.query_service.call(question, top_k=self.context_chunks)
         prompt = build_prompt(
             retrieved.question,
@@ -73,6 +74,7 @@ class AnswerService:
                 "gate_threshold": retrieved.gate.threshold,
             },
         )
+        yield AnswerEvent("progress", {"stage": "reviewing", "message": "Reviewing sources"})
         if retrieved.gate.gated:
             yield self._done("gated", answer=retrieved.gate.refusal, refusal=True)
             return
@@ -96,6 +98,7 @@ class AnswerService:
             yield self._done("not_configured", degraded=True)
             return
 
+        yield AnswerEvent("progress", {"stage": "writing", "message": "Writing answer"})
         parts: list[str] = []
         provider_stream: Iterator[TextDelta] | None = None
         try:
@@ -118,6 +121,9 @@ class AnswerService:
                     close_stream()
 
         answer = "".join(parts).strip()
+        yield AnswerEvent(
+            "progress", {"stage": "checking_citations", "message": "Checking citations"}
+        )
         checked = check_citations(answer, prompt.sources)
         if not checked.valid:
             yield self._done("invalid_citations", degraded=True, error_code=checked.reason)

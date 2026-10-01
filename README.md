@@ -113,6 +113,38 @@ curl -N --fail --silent --show-error \
 
 A cache hit does not call the provider. Without a configured key and model, `/answer` still returns sources and finishes with `not_configured`. `CONTEXT_CHUNKS` (default 4), `CONTEXT_TOKENS_PER_CHUNK` (300), and `MAX_OUTPUT_TOKENS` (512) bound the request; there is no daily spending tracker. Check the current [OpenRouter model pricing](https://openrouter.ai/models) before choosing a model.
 
+**See the stream in a browser:** open [`/demo/`](http://127.0.0.1:8000/demo/) after starting the app. The small chat UI shows search progress, source links, arriving text, and the verified final answer. Its turns are independent; the API does not accept conversation history. Swagger's `/docs` page displays the raw SSE response rather than a chat interface.
+
+| SSE event | Frontend action |
+| --- | --- |
+| `progress` | Show a short stage message: searching, reviewing sources, writing, or checking citations. These are user-visible status updates, not private model reasoning. |
+| `sources` | Show the retrieved title, heading, URL, and citation marker. |
+| `token` | Append `data.text` to a **provisional** draft. |
+| `done` | Replace the draft with `data.answer` for `generated`, `cached`, or `gated`. For `not_configured`, `provider_error`, or `invalid_citations`, discard the draft and show the status. |
+
+For a custom frontend, copy the framework-independent [stream client](app/static/answer-stream.js) or use it directly from the same origin:
+
+```js
+import { streamAnswer } from "/demo/answer-stream.js";
+
+let draft = "";
+await streamAnswer("How do PostgreSQL indexes help?", ({ type, data }) => {
+  if (type === "progress") showStatus(data.message);
+  if (type === "sources") showSources(data.sources);
+  if (type === "token") showDraft(draft += data.text);
+  if (type === "done") {
+    if (["generated", "cached", "gated"].includes(data.status)) {
+      showFinal(data.answer, data.citations);
+    } else {
+      clearDraft();
+      showError(data.status);
+    }
+  }
+});
+```
+
+The endpoint stays `POST /answer`: browser `fetch()` can stream its SSE response while keeping the question out of a URL. Native `EventSource` only sends GET requests and can reconnect automatically, which could repeat a provider call. For a frontend on another origin, set `CORS_ORIGINS=http://localhost:5173` (or a comma-separated list of trusted origins) in `.env` and recreate `app`.
+
 **Ingest the full catalog** when you want questions spanning both documentation sets:
 
 ```sh
