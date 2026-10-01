@@ -2,7 +2,7 @@
 
 A Python and FastAPI service for answering questions about the Rails Guides and PostgreSQL documentation with cited sources. The project will measure retrieval quality, control paid model use, and show the engineering behind a production style RAG system.
 
-The service foundation, corpus preparation, and local ingestion are in place. Retrieval, answer generation, and evaluation will arrive in separate reviewable PRs. Ingestion makes no paid model calls.
+The service foundation, corpus preparation, local ingestion, and a vector retrieval baseline are in place. Hybrid retrieval, answer generation, and evaluation will arrive in separate reviewable PRs. Ingestion and retrieval make no paid model calls.
 
 ## Planned request flow
 
@@ -90,6 +90,19 @@ docker compose exec db psql -U ask -d ask_the_docs -c "SELECT document_id, statu
 Re-ingesting a page checks a fingerprint of its source bytes, source metadata, model name, chunk settings, and pipeline version. An unchanged page skips embedding and database replacement. A changed page replaces its chunks in one transaction. The page and chunk metadata remain available for the retrieval feature.
 
 `POST /ingest` can enqueue one `{"document_id": "rails:getting_started"}` or all pages with `{}`. It is disabled until `INGEST_ADMIN_KEY` is set to a private random value in `.env`; send that value in the `X-Admin-Key` header. The CLI above works without the HTTP admin key. The database host port can be changed with `POSTGRES_PORT` if 5432 is already in use.
+
+## Inspect vector retrieval
+
+After a worker has ingested at least one page, query its stored chunks:
+
+```sh
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"How do PostgreSQL indexes help queries?","top_k":5}' \
+  http://127.0.0.1:8000/query
+```
+
+`POST /query` embeds the question locally with the same model as ingestion and returns ranked chunks with their document ID, title, section path, source URL, text, and cosine distance. `top_k` defaults to 5 and is limited to 1–20; questions are limited to 500 characters. An empty corpus returns an empty `results` list. Lower cosine distance means closer vectors; it is a ranking value, not a calibrated confidence score. The endpoint returns source material for inspection and does not generate an answer or call an LLM. Hybrid keyword search, reranking, and a calibrated refusal gate come later.
 
 For Ruby developers: `pyproject.toml` plus `uv.lock` serve the role of a Gemfile and lockfile. `app/main.py` assembles the FastAPI application; `app/api` contains thin HTTP routes. Later domain services and external API clients will stay outside routes, like service objects and client/resource classes in Ruby.
 
