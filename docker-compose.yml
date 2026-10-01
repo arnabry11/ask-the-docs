@@ -5,6 +5,12 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ask}:${POSTGRES_PASSWORD:-ask}@db:5432/${POSTGRES_DB:-ask_the_docs}?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       INGEST_ADMIN_KEY: ${INGEST_ADMIN_KEY:-}
+      TOP_K_VECTOR: ${TOP_K_VECTOR:-30}
+      TOP_K_FTS: ${TOP_K_FTS:-30}
+      RRF_K: ${RRF_K:-60}
+      RERANK_MODEL: ${RERANK_MODEL:-Xenova/ms-marco-MiniLM-L-6-v2}
+      RERANK_TOP_N: ${RERANK_TOP_N:-20}
+      GATE_THRESHOLD: ${GATE_THRESHOLD:-}
     ports:
       - "8000:8000"
     volumes:

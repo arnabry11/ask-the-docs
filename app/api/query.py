@@ -42,11 +42,16 @@ class SourceChunk(BaseModel):
     keyword_rank: int | None
     cosine_distance: float | None
     fts_rank: float | None
+    rerank_score: float
 
 
 class QueryResponse(BaseModel):
     question: str
     retrieval: str = "hybrid"
+    gated: bool
+    gate_reason: str | None
+    gate_threshold: float | None
+    refusal: str | None
     results: list[SourceChunk]
 
 
@@ -58,5 +63,9 @@ def query(
     return {
         "question": result.question,
         "retrieval": "hybrid",
-        "results": [asdict(chunk) for chunk in result.chunks],
+        "gated": result.gate.gated,
+        "gate_reason": result.gate.reason,
+        "gate_threshold": result.gate.threshold,
+        "refusal": result.gate.refusal,
+        "results": [{**asdict(item.chunk), "rerank_score": item.score} for item in result.chunks],
     }

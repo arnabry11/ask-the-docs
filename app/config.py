@@ -12,8 +12,11 @@ class Settings(BaseSettings):
     top_k_vector: int = Field(default=30, ge=1, le=30)
     top_k_fts: int = Field(default=30, ge=1, le=30)
     rrf_k: int = Field(default=60, ge=1)
+    rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    rerank_top_n: int = Field(default=20, ge=1, le=20)
+    gate_threshold: float | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
 
 
 @lru_cache

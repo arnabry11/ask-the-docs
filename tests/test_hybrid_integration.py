@@ -1,4 +1,5 @@
 import os
+from collections.abc import Sequence
 from uuid import uuid4
 
 import pytest
@@ -9,6 +10,7 @@ from app.ingestion.chunk import chunk_document
 from app.ingestion.parse import ParsedDocument, ParsedSection
 from app.ingestion.repository import IngestionRepository
 from app.retrieval.keyword_repository import KeywordSearchRepository
+from app.retrieval.rerank import RerankService
 from app.retrieval.service import QueryService
 from app.retrieval.vector_repository import VectorSearchRepository
 
@@ -16,6 +18,11 @@ from app.retrieval.vector_repository import VectorSearchRepository
 class FakeEmbedder:
     def embed_query(self, question: str) -> list[float]:
         return [1.0] + [0.0] * 383
+
+
+class PreserveFusionOrderScorer:
+    def score(self, question: str, passages: Sequence[str]) -> list[float]:
+        return [float(len(passages) - index) for index in range(len(passages))]
 
 
 def document(document_id: str, body: str) -> ParsedDocument:
@@ -50,17 +57,20 @@ def test_hybrid_query_promotes_exact_terms_and_keeps_vector_fallback() -> None:
             keyword_doc, chunk_document(keyword_doc), [[0.0, 1.0] + [0.0] * 382], "c" * 64
         )
         service = QueryService(
-            FakeEmbedder(), VectorSearchRepository(engine), KeywordSearchRepository(engine)
+            FakeEmbedder(),
+            VectorSearchRepository(engine),
+            KeywordSearchRepository(engine),
+            RerankService(PreserveFusionOrderScorer()),
         )
 
         exact = service.call("quasar indexing", top_k=1)
         fallback = service.call("???", top_k=1)
 
-        assert exact.chunks[0].document_id == keyword_doc.document_id
-        assert exact.chunks[0].keyword_rank == 1
-        assert exact.chunks[0].vector_rank == 2
-        assert fallback.chunks[0].document_id == vector_doc.document_id
-        assert fallback.chunks[0].keyword_rank is None
+        assert exact.chunks[0].chunk.document_id == keyword_doc.document_id
+        assert exact.chunks[0].chunk.keyword_rank == 1
+        assert exact.chunks[0].chunk.vector_rank == 2
+        assert fallback.chunks[0].chunk.document_id == vector_doc.document_id
+        assert fallback.chunks[0].chunk.keyword_rank is None
     finally:
         with engine.begin() as connection:
             connection.execute(
