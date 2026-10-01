@@ -2,7 +2,7 @@
 
 A Python and FastAPI service for answering questions about the Rails Guides and PostgreSQL documentation with cited sources. The project will measure retrieval quality, control paid model use, and show the engineering behind a production style RAG system.
 
-The service foundation, corpus preparation, local ingestion, hybrid retrieval, and local reranking are in place. Answer generation and evaluation will arrive in separate reviewable PRs. Ingestion and retrieval make no paid model calls.
+The service foundation, corpus preparation, local ingestion, hybrid retrieval, local reranking, and a [retrieval evaluation dataset](evals/README.md) are in place. Answer generation and evaluation experiments will arrive in separate reviewable PRs. Ingestion and retrieval make no paid model calls.
 
 ## Planned request flow
 
