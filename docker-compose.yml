@@ -7,6 +7,8 @@ services:
       INGEST_ADMIN_KEY: ${INGEST_ADMIN_KEY:-}
     ports:
       - "8000:8000"
+    volumes:
+      - model_cache:/app/models
     depends_on:
       db:
         condition: service_healthy

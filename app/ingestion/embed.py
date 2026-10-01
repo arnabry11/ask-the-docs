@@ -1,3 +1,4 @@
+import math
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
@@ -14,6 +15,10 @@ EMBED_BATCH_SIZE = 32
 
 class EmbeddingClient(Protocol):
     def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
+
+
+class QueryEmbeddingClient(Protocol):
+    def embed_query(self, question: str) -> list[float]: ...
 
 
 def embedding_text(chunk: Chunk) -> str:
@@ -38,3 +43,15 @@ class FastEmbedClient:
         ):
             raise ValueError(f"Embedding model must return {EMBEDDING_DIMENSIONS} values per text")
         return vectors
+
+    def embed_query(self, question: str) -> list[float]:
+        vectors = [
+            [float(value) for value in vector] for vector in self.model.query_embed(question)
+        ]
+        if (
+            len(vectors) != 1
+            or len(vectors[0]) != EMBEDDING_DIMENSIONS
+            or not all(math.isfinite(value) for value in vectors[0])
+        ):
+            raise ValueError(f"Query embedding must contain {EMBEDDING_DIMENSIONS} finite values")
+        return vectors[0]
