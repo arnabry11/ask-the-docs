@@ -50,4 +50,25 @@ The reranker moved one additional question's gold page into the top five and thr
 
 The two reranked top-five misses were Q015 and Q025. Q015's gold label points to the Rails validation guide, while the top results came from other Rails pages; the labels are primary reference pages rather than a complete list of relevant pages. For Q025, the gold PostgreSQL indexes overview reached rank eight, behind related index pages. Reviewing those passages and adding relevance judgments would make the evaluation stronger.
 
-With the threshold unset, the gate refused 0 of 10 unanswerable questions and incorrectly refused 0 of 50 answerable questions. These are expected baseline counts, not evidence that the system answers unsupported questions safely. The next feature should calibrate a threshold against these labels and inspect the overlap between positive and negative score distributions. Do not treat raw reranker scores as probabilities.
+With the threshold unset, the gate refused 0 of 10 unanswerable questions and incorrectly refused 0 of 50 answerable questions. These are expected baseline counts, not evidence that the system answers unsupported questions safely. Do not treat raw reranker scores as probabilities.
+
+## Gate calibration study
+
+Reproduce the [calibration report](results/gate_calibration.json) from the committed retrieval scores without a database or model call:
+
+```sh
+uv run python -m evals.calibrate_gate
+```
+
+The script verifies the dataset hash, question IDs, labels, and finite reranker scores. It sweeps every distinct score boundary using the same rule as the runtime gate: a score **strictly below** the threshold is refused. It selects the threshold that refuses the most unanswerable questions while incorrectly refusing at most 2% of answerable questions (one of 50 here). Ties favor fewer incorrect refusals and a lower threshold. A one-decimal threshold is used when rounding leaves every decision unchanged.
+
+| Threshold | Unanswerable refused | Answerable incorrectly refused | Balanced accuracy |
+| --- | ---: | ---: | ---: |
+| Unset baseline | 0/10 | 0/50 | 0.50 |
+| 0.0 | 5/10 | 1/50 | 0.74 |
+| **1.5, selected** | **7/10** | **1/50** | **0.84** |
+| 2.04, highest balanced accuracy | 8/10 | 3/50 | 0.87 |
+
+At 1.5, Q025 is the single incorrectly refused answerable question. Its gold indexes overview reached rank eight in the retrieval baseline, so the low score may reflect a context retrieval failure. Q054, Q055, and Q058 are unsupported questions that still pass the gate. A high score means the retrieved text looks relevant to the reranker; it does not prove the answer is in the selected passages.
+
+The same 60 questions selected and evaluated this threshold, and only 10 are unanswerable. These counts are calibration-set results, not held-out performance estimates. The score scale also belongs to the recorded reranker and retrieval settings; changing the model, corpus, or candidate strategy requires another evaluation. This gate reduces unnecessary generation calls but cannot replace the answer prompt's instruction to refuse unsupported requests.

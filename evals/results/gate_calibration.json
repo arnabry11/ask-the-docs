@@ -1,0 +1,121 @@
+{
+  "comparisons": {
+    "best_balanced_accuracy": {
+      "answerable_total": 50,
+      "answerable_wrongly_gated": 3,
+      "balanced_accuracy": 0.87,
+      "correct_gate_ids": [
+        "Q051",
+        "Q052",
+        "Q053",
+        "Q055",
+        "Q056",
+        "Q057",
+        "Q059",
+        "Q060"
+      ],
+      "false_gate_ids": [
+        "Q005",
+        "Q009",
+        "Q025"
+      ],
+      "threshold": 2.0401976108551025,
+      "unanswerable_gated": 8,
+      "unanswerable_not_gated_ids": [
+        "Q054",
+        "Q058"
+      ],
+      "unanswerable_total": 10
+    },
+    "unset": {
+      "answerable_total": 50,
+      "answerable_wrongly_gated": 0,
+      "balanced_accuracy": 0.5,
+      "correct_gate_ids": [],
+      "false_gate_ids": [],
+      "threshold": null,
+      "unanswerable_gated": 0,
+      "unanswerable_not_gated_ids": [
+        "Q051",
+        "Q052",
+        "Q053",
+        "Q054",
+        "Q055",
+        "Q056",
+        "Q057",
+        "Q058",
+        "Q059",
+        "Q060"
+      ],
+      "unanswerable_total": 10
+    },
+    "zero": {
+      "answerable_total": 50,
+      "answerable_wrongly_gated": 1,
+      "balanced_accuracy": 0.74,
+      "correct_gate_ids": [
+        "Q051",
+        "Q052",
+        "Q056",
+        "Q057",
+        "Q059"
+      ],
+      "false_gate_ids": [
+        "Q025"
+      ],
+      "threshold": 0.0,
+      "unanswerable_gated": 5,
+      "unanswerable_not_gated_ids": [
+        "Q053",
+        "Q054",
+        "Q055",
+        "Q058",
+        "Q060"
+      ],
+      "unanswerable_total": 10
+    }
+  },
+  "corpus_fingerprint": "5626b48eef5578ead0ab3a47e2a7c4d100c239c5bf17970ad463a350e215df29",
+  "dataset_sha256": "58c798846c85e425835e97bf4b1cf41a22d63e3720be16b06a5b57960b88e6e2",
+  "policy": {
+    "max_false_gate_rate": 0.02,
+    "max_wrongly_gated_answerable": 1,
+    "selection": "Most unanswerable gated within the false-gate cap; ties favor fewer false gates and a lower threshold"
+  },
+  "retrieval_settings": {
+    "embedding_model": "BAAI/bge-small-en-v1.5",
+    "gate_threshold": null,
+    "rerank_model": "Xenova/ms-marco-MiniLM-L-6-v2",
+    "rerank_top_n": 20,
+    "rrf_k": 60,
+    "top_k_fts": 30,
+    "top_k_vector": 30
+  },
+  "schema_version": 1,
+  "selected": {
+    "answerable_total": 50,
+    "answerable_wrongly_gated": 1,
+    "balanced_accuracy": 0.84,
+    "correct_gate_ids": [
+      "Q051",
+      "Q052",
+      "Q053",
+      "Q056",
+      "Q057",
+      "Q059",
+      "Q060"
+    ],
+    "false_gate_ids": [
+      "Q025"
+    ],
+    "threshold": 1.5,
+    "unanswerable_gated": 7,
+    "unanswerable_not_gated_ids": [
+      "Q054",
+      "Q055",
+      "Q058"
+    ],
+    "unanswerable_total": 10
+  },
+  "source_report_sha256": "789f193ea23e7287d8bee3709f416d48d75bd652f3c08be76f262097546b40a6"
+}
