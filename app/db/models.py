@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import ARRAY, Computed, DateTime, Integer, Text, func
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.ingestion.constants import EMBEDDING_DIMENSIONS
@@ -50,4 +50,15 @@ class IngestionAttemptRecord(Base):
     document_id: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text)
     detail: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LlmCacheRecord(Base):
+    __tablename__ = "llm_cache"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    answer: Mapped[str] = mapped_column(Text)
+    citations: Mapped[list[dict[str, object]]] = mapped_column(JSONB)
+    model: Mapped[str] = mapped_column(Text)
+    prompt_version: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
